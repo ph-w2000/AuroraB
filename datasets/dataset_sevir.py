@@ -364,7 +364,14 @@ class SEVIRDataLoader:
             s = df.loc[i]
             idx = s.file_index if i != 'lght' else s.id
             d.update({f'{i}_filename': [s.file_name],
-                      f'{i}_index': [idx]})
+                      f'{i}_index': [idx],
+                      f'{i}_time_utc': [s.time_utc],
+                      f'{i}_llcrnrlat': [s.llcrnrlat],
+                      f'{i}_llcrnrlon': [s.llcrnrlon],
+                      f'{i}_urcrnrlat': [s.urcrnrlat],
+                      f'{i}_urcrnrlon': [s.urcrnrlon],
+                      f'{i}_minute_offsets': [s.minute_offsets]},
+                    )
 
         return pd.DataFrame(d)
 
@@ -468,7 +475,24 @@ class SEVIRDataLoader:
                 data_i = self._lght_to_grid(lght_data, t_slice)
             else:
                 data_i = self._hdf_files[fname][t][idx:idx + 1, :, :, t_slice]
-            data[t] = np.concatenate((data[t], data_i), axis=0) if (t in data) else data_i
+
+            if t in data:
+                data[t]['data'] = np.concatenate((data[t]['data'], data_i), axis=0)
+                data[t]['time_utc'].append(row[f'{t}_time_utc'])
+                data[t]['llcrnrlat'].append(row[f'{t}_llcrnrlat'])
+                data[t]['llcrnrlon'].append(row[f'{t}_llcrnrlon'])
+                data[t]['urcrnrlat'].append(row[f'{t}_urcrnrlat'])
+                data[t]['urcrnrlon'].append(row[f'{t}_urcrnrlon'])
+                data[t]['minute_offsets'].append(row[f'{t}_minute_offsets'])
+            else:
+                data[t] = {'data': data_i,
+                           'time_utc': [row[f'{t}_time_utc']],
+                            'llcrnrlat': [row[f'{t}_llcrnrlat']],
+                            'llcrnrlon': [row[f'{t}_llcrnrlon']],
+                            'urcrnrlat': [row[f'{t}_urcrnrlat']],
+                            'urcrnrlon': [row[f'{t}_urcrnrlon']],
+                            'minute_offsets': [row[f'{t}_minute_offsets']],
+                            }
 
         return data
 
@@ -603,16 +627,26 @@ class SEVIRDataLoader:
         data = {}
         for index, row in pd_batch.iterrows():
             data = self._read_data(row, data)
-        if pad_size > 0:
-            event_batch = []
-            for t in self.data_types:
-                pad_shape = [pad_size, ] + list(data[t].shape[1:])
-                data_pad = np.concatenate((data[t].astype(self.output_type),
-                                           np.zeros(pad_shape, dtype=self.output_type)),
-                                          axis=0)
-                event_batch.append(data_pad)
-        else:
-            event_batch = [data[t].astype(self.output_type) for t in self.data_types]
+
+        event_batch = []
+        for t in self.data_types:
+            if pad_size > 0:
+                pad_shape = [pad_size, ] + list(data[t]['data'].shape[1:])
+                data_pad = np.concatenate((data[t]['data'].astype(self.output_type),
+                                                np.zeros(pad_shape, dtype=self.output_type)),
+                                            axis=0)
+            else:
+                data_pad = data[t]['data'].astype(self.output_type)
+            dict = {}
+            dict['data'] = data_pad
+            dict['time_utc'] = data[t]['time_utc']
+            dict['llcrnrlat'] = data[t]['llcrnrlat']
+            dict['llcrnrlon'] = data[t]['llcrnrlon']
+            dict['urcrnrlat'] = data[t]['urcrnrlat']
+            dict['urcrnrlon'] = data[t]['urcrnrlon']
+            dict['minute_offsets'] = data[t]['minute_offsets']
+            event_batch.append(dict)
+
         return event_batch
 
     def __iter__(self):
@@ -908,17 +942,36 @@ class SEVIRDataLoader:
         event_batch = self._load_event_batch(event_idx=start_event_idx,
                                              event_batch_size=event_batch_size)
         ret_dict = {}
+        metadata_dict = {
+            'llcrnrlat': [],
+            'llcrnrlon': [],
+            'urcrnrlat': [],
+            'urcrnrlon': [],
+            'time_utc': [],
+        }
         for sampled_idx in sampled_idx_list:
             batch_slice = [sampled_idx['event_idx'] - start_event_idx, ]  # use [] to keepdim
             seq_slice = slice(sampled_idx['seq_idx'] * self.stride,
                               sampled_idx['seq_idx'] * self.stride + self.seq_len)
             for imgt_idx, imgt in enumerate(self.data_types):
-                sampled_seq = event_batch[imgt_idx][batch_slice, :, :, seq_slice]
+                sampled_seq = event_batch[imgt_idx]['data'][batch_slice, :, :, seq_slice]
+                llcrnrlat = event_batch[imgt_idx]['llcrnrlat'][batch_slice[0]]
+                llcrnrlon = event_batch[imgt_idx]['llcrnrlon'][batch_slice[0]]
+                urcrnrlat = event_batch[imgt_idx]['urcrnrlat'][batch_slice[0]]
+                urcrnrlon = event_batch[imgt_idx]['urcrnrlon'][batch_slice[0]]
+                minute_offsets = event_batch[imgt_idx]['minute_offsets'][batch_slice[0]].split(":")[seq_slice.start+1]
+                time_utc = event_batch[imgt_idx]['time_utc'][batch_slice[0]]
+                new_time_utc = time_utc + datetime.timedelta(minutes=int(minute_offsets))
                 if imgt in ret_dict:
                     ret_dict[imgt] = np.concatenate((ret_dict[imgt], sampled_seq),
                                                     axis=0)
                 else:
                     ret_dict.update({imgt: sampled_seq})
+                metadata_dict['llcrnrlat'].append(llcrnrlat)
+                metadata_dict['llcrnrlon'].append(llcrnrlon)
+                metadata_dict['urcrnrlat'].append(urcrnrlat)
+                metadata_dict['urcrnrlon'].append(urcrnrlon)
+                metadata_dict['time_utc'].append(new_time_utc)
 
         ret_dict = self.data_dict_to_tensor(data_dict=ret_dict,
                                             data_types=self.data_types)
@@ -933,7 +986,7 @@ class SEVIRDataLoader:
                                                  data_types=self.data_types,
                                                  factors_dict=self.downsample_dict,
                                                  layout=self.layout)
-        return ret_dict
+        return ret_dict, metadata_dict
 
 class SEVIRTorchDataset(TorchDataset):
 
@@ -1000,11 +1053,11 @@ class SEVIRTorchDataset(TorchDataset):
 
                     ])
     def __getitem__(self, index):
-        data_dict = self.sevir_dataloader._idx_sample(index=index)
+        data_dict, metadata_dict = self.sevir_dataloader._idx_sample(index=index)
         data = data_dict["vil"]
-        data = self.transform(data).unsqueeze(2)
+        data = self.transform(data)
 
-        return data
+        return data, metadata_dict
 
     def __len__(self):
         return self.sevir_dataloader.__len__()

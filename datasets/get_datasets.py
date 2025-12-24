@@ -129,6 +129,8 @@ def get_dataset(data_name, img_size, seq_len, **kwargs):
         
     elif dataset_name == 'sevir':
         from .dataset_sevir import SEVIRTorchDataset, gray2color, PIXEL_SCALE, THRESHOLDS
+
+        stride = 13
         
         train_valid_split = (2019, 1, 1)
         valid_test_split = (2019, 10, 1)
@@ -140,7 +142,7 @@ def get_dataset(data_name, img_size, seq_len, **kwargs):
             img_size=img_size,
             shuffle=True,
             seq_len=seq_len,
-            stride=5,      # ?
+            stride=stride,      # ?
             sample_mode='sequent',
             batch_size=batch_size,
             num_shard=1,
@@ -159,7 +161,7 @@ def get_dataset(data_name, img_size, seq_len, **kwargs):
             img_size=img_size,
             shuffle=False,
             seq_len=seq_len,
-            stride=5,      # ?
+            stride=stride,      # ?
             sample_mode='sequent',
             batch_size=batch_size * 2,
             num_shard=1,
@@ -178,7 +180,7 @@ def get_dataset(data_name, img_size, seq_len, **kwargs):
             shuffle=False,
             img_size=img_size,
             seq_len=seq_len,
-            stride=5,      # ?
+            stride=stride,      # ?
             sample_mode='sequent',
             batch_size=batch_size * 2,
             num_shard=1,
