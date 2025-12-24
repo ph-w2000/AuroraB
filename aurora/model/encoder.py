@@ -114,10 +114,10 @@ class Perceiver3DEncoder(nn.Module):
                 atmos_vars += tuple(f"static_{v}" for v in static_vars)
 
         # Latent tokens
-        assert latent_levels > 1, "At least two latent levels are required."
+        # assert latent_levels > 1, "At least two latent levels are required."
         self.latent_levels = latent_levels
         # One latent level will be used by the surface level.
-        self.atmos_latents = nn.Parameter(torch.randn(latent_levels - 1, embed_dim))
+        # self.atmos_latents = nn.Parameter(torch.randn(latent_levels - 1, embed_dim))
 
         # Learnable embedding to encode the surface level.
         self.surf_level_encoding = nn.Parameter(torch.randn(embed_dim))
@@ -134,16 +134,16 @@ class Perceiver3DEncoder(nn.Module):
         # Patch embeddings:
         assert max_history_size > 0, "At least one history step is required."
         self.surf_token_embeds = LevelPatchEmbed(surf_vars, patch_size, embed_dim, max_history_size)
-        if not self.level_condition:
-            self.atmos_token_embeds = LevelPatchEmbed(
-                atmos_vars, patch_size, embed_dim, max_history_size
-            )
-        else:
-            self.atmos_token_embeds = LevelConditioned(
-                lambda: LevelPatchEmbed(atmos_vars, patch_size, embed_dim, max_history_size),
-                levels=self.level_condition,
-                levels_dim=-5,
-            )
+        # if not self.level_condition:
+        #     self.atmos_token_embeds = LevelPatchEmbed(
+        #         atmos_vars, patch_size, embed_dim, max_history_size
+        #     )
+        # else:
+        #     self.atmos_token_embeds = LevelConditioned(
+        #         lambda: LevelPatchEmbed(atmos_vars, patch_size, embed_dim, max_history_size),
+        #         levels=self.level_condition,
+        #         levels_dim=-5,
+        #     )
 
         # Learnable pressure level aggregation:
         self.level_agg = PerceiverResampler(
@@ -167,7 +167,7 @@ class Perceiver3DEncoder(nn.Module):
         #
         #   https://github.com/huggingface/transformers/blob/v4.36.1/src/transformers/models/perceiver/modeling_perceiver.py#L628
         #
-        torch.nn.init.trunc_normal_(self.atmos_latents, std=0.02)
+        # torch.nn.init.trunc_normal_(self.atmos_latents, std=0.02)
         torch.nn.init.trunc_normal_(self.surf_level_encoding, std=0.02)
 
     def aggregate_levels(self, x: torch.Tensor) -> torch.Tensor:
@@ -211,72 +211,72 @@ class Perceiver3DEncoder(nn.Module):
         atmos_levels = batch.metadata.atmos_levels
 
         x_surf = torch.stack(tuple(batch.surf_vars.values()), dim=2)
-        x_static = torch.stack(tuple(batch.static_vars.values()), dim=2)
-        x_atmos = torch.stack(tuple(batch.atmos_vars.values()), dim=2)
+        # x_static = torch.stack(tuple(batch.static_vars.values()), dim=2)
+        # x_atmos = torch.stack(tuple(batch.atmos_vars.values()), dim=2)
 
-        B, T, _, C, H, W = x_atmos.size()
+        B, T, C, H, W = x_surf.size()
         assert x_surf.shape[:2] == (B, T), f"Expected shape {(B, T)}, got {x_surf.shape[:2]}."
 
-        if static_vars is None:
-            assert x_static is None, "Static variables given, but not configured."
-        else:
-            assert x_static is not None, "Static variables not given."
-            x_static = x_static.expand((B, T, -1, -1, -1))
+        # if static_vars is None:
+        #     assert x_static is None, "Static variables given, but not configured."
+        # else:
+        #     assert x_static is not None, "Static variables not given."
+        #     x_static = x_static.expand((B, T, -1, -1, -1))
 
-            if self.dynamic_vars:
-                ones = torch.ones((1, T, 1, H, W), device=x_static.device, dtype=x_static.dtype)
-                time = batch.metadata.time
-                x_dynamic = torch.cat(
-                    [
-                        torch.cat(
-                            (
-                                ones * np.cos(2 * np.pi * time[b].hour / 24),
-                                ones * np.sin(2 * np.pi * time[b].hour / 24),
-                                ones * np.cos(2 * np.pi * time[b].weekday() / 7),
-                                ones * np.sin(2 * np.pi * time[b].weekday() / 7),
-                                ones * np.cos(2 * np.pi * time[b].day / 365.25),
-                                ones * np.sin(2 * np.pi * time[b].day / 365.25),
-                            ),
-                            dim=-3,
-                        )
-                        for b in range(B)
-                    ],
-                    dim=0,
-                )
-                dynamic_vars = ("tod_cos", "tod_sin", "dow_cos", "dow_sin", "doy_cos", "doy_sin")
-                x_surf = torch.cat((x_surf, x_static, x_dynamic), dim=2)
-                surf_vars = surf_vars + static_vars + dynamic_vars
+        #     if self.dynamic_vars:
+        #         ones = torch.ones((1, T, 1, H, W), device=x_static.device, dtype=x_static.dtype)
+        #         time = batch.metadata.time
+        #         x_dynamic = torch.cat(
+        #             [
+        #                 torch.cat(
+        #                     (
+        #                         ones * np.cos(2 * np.pi * time[b].hour / 24),
+        #                         ones * np.sin(2 * np.pi * time[b].hour / 24),
+        #                         ones * np.cos(2 * np.pi * time[b].weekday() / 7),
+        #                         ones * np.sin(2 * np.pi * time[b].weekday() / 7),
+        #                         ones * np.cos(2 * np.pi * time[b].day / 365.25),
+        #                         ones * np.sin(2 * np.pi * time[b].day / 365.25),
+        #                     ),
+        #                     dim=-3,
+        #                 )
+        #                 for b in range(B)
+        #             ],
+        #             dim=0,
+        #         )
+        #         dynamic_vars = ("tod_cos", "tod_sin", "dow_cos", "dow_sin", "doy_cos", "doy_sin")
+        #         x_surf = torch.cat((x_surf, x_static, x_dynamic), dim=2)
+        #         surf_vars = surf_vars + static_vars + dynamic_vars
 
-                # Add to atmospheric variables too.
-                if self.atmos_static_vars:
-                    # in this case, we prefix the static variables to avoid name clashes. e.g., `z`
-                    # is both a static variable and an atmospheric variable.
-                    atmos_vars += tuple(f"static_{v}" for v in static_vars + dynamic_vars)
-                    inds = (-1, -1, -1, len(atmos_levels), -1, -1)
-                    x_atmos = torch.cat(
-                        (
-                            x_atmos,
-                            # Repeat for every pressure level.
-                            x_static[..., None, :, :].expand(*inds),
-                            x_dynamic[..., None, :, :].expand(*inds),
-                        ),
-                        dim=2,
-                    )
-            else:
-                x_surf = torch.cat((x_surf, x_static), dim=2)  # (B, T, V_S + V_Static, H, W)
-                surf_vars = surf_vars + static_vars
+        #         # Add to atmospheric variables too.
+        #         if self.atmos_static_vars:
+        #             # in this case, we prefix the static variables to avoid name clashes. e.g., `z`
+        #             # is both a static variable and an atmospheric variable.
+        #             atmos_vars += tuple(f"static_{v}" for v in static_vars + dynamic_vars)
+        #             inds = (-1, -1, -1, len(atmos_levels), -1, -1)
+        #             x_atmos = torch.cat(
+        #                 (
+        #                     x_atmos,
+        #                     # Repeat for every pressure level.
+        #                     x_static[..., None, :, :].expand(*inds),
+        #                     x_dynamic[..., None, :, :].expand(*inds),
+        #                 ),
+        #                 dim=2,
+        #             )
+        #     else:
+        #         x_surf = torch.cat((x_surf, x_static), dim=2)  # (B, T, V_S + V_Static, H, W)
+        #         surf_vars = surf_vars + static_vars
 
-                # Add to atmospheric variables too.
-                if self.atmos_static_vars:
-                    atmos_vars = atmos_vars + static_vars
-                    x_atmos = torch.cat(
-                        (
-                            x_atmos,
-                            # Repeat for every pressure level.
-                            x_static[..., None, :, :].expand(-1, -1, -1, len(atmos_levels), -1, -1),
-                        ),
-                        dim=2,
-                    )
+        #         # Add to atmospheric variables too.
+        #         if self.atmos_static_vars:
+        #             atmos_vars = atmos_vars + static_vars
+        #             x_atmos = torch.cat(
+        #                 (
+        #                     x_atmos,
+        #                     # Repeat for every pressure level.
+        #                     x_static[..., None, :, :].expand(-1, -1, -1, len(atmos_levels), -1, -1),
+        #                 ),
+        #                 dim=2,
+        #             )
 
         lat, lon = batch.metadata.lat, batch.metadata.lon
         check_lat_lon_dtype(lat, lon)
@@ -303,15 +303,15 @@ class Perceiver3DEncoder(nn.Module):
             )
 
         # Patch embed the atmospheric levels.
-        if not self.level_condition:
-            x_atmos = rearrange(x_atmos, "b t v c h w -> (b c) v t h w")
-            x_atmos = self.atmos_token_embeds(x_atmos, atmos_vars)
-            x_atmos = rearrange(x_atmos, "(b c) l d -> b c l d", b=B, c=C)
-        else:
-            # In this case we need to keep the levels dimension separate.
-            x_atmos = rearrange(x_atmos, "b t v c h w -> b c v t h w")
-            x_atmos = self.atmos_token_embeds(x_atmos, atmos_vars, levels=atmos_levels)
-            # The levels dimension is now already in the right place.
+        # if not self.level_condition:
+        #     x_atmos = rearrange(x_atmos, "b t v c h w -> (b c) v t h w")
+        #     x_atmos = self.atmos_token_embeds(x_atmos, atmos_vars)
+        #     x_atmos = rearrange(x_atmos, "(b c) l d -> b c l d", b=B, c=C)
+        # else:
+        #     # In this case we need to keep the levels dimension separate.
+        #     x_atmos = rearrange(x_atmos, "b t v c h w -> b c v t h w")
+        #     x_atmos = self.atmos_token_embeds(x_atmos, atmos_vars, levels=atmos_levels)
+        #     # The levels dimension is now already in the right place.
 
         # Add surface level encoding. This helps the model distinguish between surface and
         # atmospheric levels.
@@ -320,16 +320,17 @@ class Perceiver3DEncoder(nn.Module):
         x_surf = x_surf + self.surf_norm(self.surf_mlp(x_surf))
 
         # Add atmospheric pressure encoding of shape (C_A, D) and subsequent embedding.
-        atmos_levels_tensor = torch.tensor(atmos_levels, device=x_atmos.device)
-        atmos_levels_encode = levels_expansion(atmos_levels_tensor, self.embed_dim).to(dtype=dtype)
-        atmos_levels_embed = self.atmos_levels_embed(atmos_levels_encode)[None, :, None, :]
-        x_atmos = x_atmos + atmos_levels_embed  # (B, C_A, L, D)
+        # atmos_levels_tensor = torch.tensor(atmos_levels, device=x_atmos.device)
+        # atmos_levels_encode = levels_expansion(atmos_levels_tensor, self.embed_dim).to(dtype=dtype)
+        # atmos_levels_embed = self.atmos_levels_embed(atmos_levels_encode)[None, :, None, :]
+        # x_atmos = x_atmos + atmos_levels_embed  # (B, C_A, L, D)
 
         # Aggregate over pressure levels.
-        x_atmos = self.aggregate_levels(x_atmos)  # (B, C_A, L, D) to (B, C, L, D)
+        # x_atmos = self.aggregate_levels(x_atmos)  # (B, C_A, L, D) to (B, C, L, D)
 
         # Concatenate the surface level with the amospheric levels.
-        x = torch.cat((x_surf.unsqueeze(1), x_atmos), dim=1)
+        # x = torch.cat((x_surf.unsqueeze(1), x_atmos), dim=1)
+        x = x_surf.unsqueeze(1)
 
         # Add position and scale embeddings to the 3D tensor.
         pos_encode, scale_encode = pos_scale_enc(
