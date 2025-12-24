@@ -9,6 +9,8 @@ import yaml
 from tqdm import tqdm
 from datetime import timedelta
 import wandb
+import pandas as pd
+import torch.nn.functional as F
 
 import torch
 from accelerate import Accelerator
@@ -24,6 +26,9 @@ from diffusers import (
 from datasets.get_datasets import get_dataset
 from utils.metrics import Evaluator
 from utils.tools import print_log, cycle, show_img_info
+from aurora import AuroraSmallPretrained, AuroraPretrained, Batch, Metadata
+from aurora.normalisation import locations, scales
+from datetime import datetime, timedelta
 os.environ["ACCELERATE_DEBUG_MODE"] = "1"
 
 def create_parser():
@@ -44,7 +49,7 @@ def create_parser():
     parser.add_argument("--num_workers",    type=int,   default=8,              help="number of workers for data loader")
     
     # --------------- Optimizer ---------------
-    parser.add_argument("--lr",             type=float, default=1e-4,            help="learning rate")
+    parser.add_argument("--lr",             type=float, default=3e-4,            help="learning rate")
     parser.add_argument("--lr-beta1",       type=float, default=0.90,            help="learning rate beta 1")
     parser.add_argument("--lr-beta2",       type=float, default=0.95,            help="learning rate beta 2")
     parser.add_argument("--l2-norm",        type=float, default=0.0,             help="l2 norm weight decay")
@@ -55,7 +60,7 @@ def create_parser():
     parser.add_argument("--grad_acc_step",  type=int,   default=1,               help="gradient accumulation step")
     
     # --------------- Training ---------------
-    parser.add_argument("--batch_size",     type=int,   default=8,              help="batch size")
+    parser.add_argument("--batch_size",     type=int,   default=3,              help="batch size")
     parser.add_argument("--epochs",         type=int,   default=40,              help="number of epochs")
     parser.add_argument("--training_steps", type=int,   default=200000,          help="number of training steps")
     parser.add_argument("--early_stop",     type=int,   default=10,              help="early stopping steps")
@@ -223,19 +228,19 @@ class Runner(object):
         # =================================
         # import and create different models given model config
         # =================================
-        from aurora import AuroraSmallPretrained, Batch, Metadata
-        from aurora.normalisation import locations, scales
 
         model = AuroraSmallPretrained(
             surf_vars=("vil",),
             static_vars=None,
             atmos_vars=None,
+            timestep=timedelta(hours=0.0833333),
+            autocast=True,
         )
         model.load_checkpoint(strict=False)
+        model.configure_activation_checkpointing()
+
         locations["vil"] = 0.0
         scales["vil"] = 1.0
-        locations["vil_50"] = 0.0
-        scales["vil_50"] = 1.0
                                 
         self.model = model
         self.ema = EMA(self.model, beta=self.args.ema_rate, update_every=20).to(self.device)        
@@ -243,8 +248,6 @@ class Runner(object):
         if self.is_main:
             total = sum([param.nelement() for param in self.model.parameters()])
             print_log("Main Model Parameters: %.2fM" % (total/1e6), self.is_main)
-
-        exit()
 
 
     def _build_optimizer(self):
@@ -366,8 +369,8 @@ class Runner(object):
                 # train the model with mixed_precision
                 with self.accelerator.autocast(self.model):
 
-                    loss_dict = self._train_batch(batch)
-                    self.accelerator.backward(loss_dict['total_loss'])
+                    loss = self._train_batch(batch)
+                    self.accelerator.backward(loss)
                     
                     if self.cur_step == 0:
                         # training process check
@@ -375,10 +378,7 @@ class Runner(object):
                             if param.grad is None:
                                 print_log(name, self.is_main)
 
-                wandb.log({'loss':(loss_dict['total_loss'].detach().item()), 
-                        'loss_backbone':(loss_dict['phydnet'].detach().item()), 
-                        'loss_pixel':(loss_dict['pixel_ep'].detach().item()), 
-                        'loss_latent':(loss_dict['latent_ep'].detach().item()), 
+                wandb.log({'loss':(loss.detach().item()), 
                         'epoch':epoch,
                         'steps':self.cur_step}) 
     
@@ -396,8 +396,7 @@ class Runner(object):
                 lr = self.optimizer.param_groups[0]['lr']
                 log_dict = dict()
                 log_dict['lr'] = lr
-                for k,v in loss_dict.items():
-                    log_dict[k] = v.item()
+                log_dict['loss'] = loss.detach().item()
                 self.accelerator.log(log_dict, step=self.cur_step)
                 pbar.set_postfix(**log_dict)   
                 state_str = f"Epoch {self.cur_epoch}/{self.global_epochs}, Step {i}/{self.steps_per_epoch}"
@@ -410,22 +409,6 @@ class Runner(object):
 
                 self.cur_step += 1
                 pbar.update(1)
-                
-                # do santy check at begining
-                if self.cur_step == 1:
-                    """ santy check """
-                    if not osp.exists(self.sanity_path):
-                        try:
-                            print_log(f" ========= Running Sanity Check ==========", self.is_main)
-                            radar_ori, radar_recon= self._sample_batch(batch)
-                            os.makedirs(self.sanity_path)
-                            if self.is_main:
-                                for i in range(radar_ori.shape[0]):
-                                    self.visiual_save_fn(radar_recon[i], radar_ori[i], osp.join(self.sanity_path, f"{i}/vil"),data_type='vil')
-
-                        except Exception as e:
-                            print_log(e, self.is_main)
-                            print_log("Sanity Check Failed", self.is_main)
 
             # save checkpoint and do test every epoch
             self.save()
@@ -438,13 +421,32 @@ class Runner(object):
         return batch      # [B, T, C, H, W]
     
     def _train_batch(self, batch):
-        radar_batch = self._get_seq_data(batch)
+        radar_batch, metadata = self._get_seq_data(batch)
         frames_in, frames_out = radar_batch[:,:self.args.frames_in], radar_batch[:,self.args.frames_in:]
         assert radar_batch.shape[1] == self.args.frames_out + self.args.frames_in, "radar sequence length error"
-        loss = self.model.training_losses(frames_in=frames_in, frames_gt=frames_out, compute_loss=True)
-        if loss is None:
-            raise ValueError("Loss is None, please check the model predict function")
-        loss['total_loss'] = loss['phydnet'] * 0.1 + loss['pixel_ep'] * 0.1 + loss['latent_ep'] * 0.5
+
+        predictions = []
+        model_input = frames_in
+        for i in range(self.args.frames_out):
+            batch = Batch(
+                surf_vars={"vil": model_input},
+                static_vars={},
+                atmos_vars={},
+                metadata=Metadata(
+                    lat=torch.linspace(metadata['urcrnrlat'][0], metadata['llcrnrlat'][0], self.args.img_size),
+                    lon=torch.linspace(metadata['llcrnrlon'][0]%360, metadata['urcrnrlon'][0]%360, self.args.img_size + 1)[:-1],
+                    time=tuple((t+pd.Timedelta(minutes=5 * i)).to_pydatetime() for t in metadata['time_utc']),
+                    atmos_levels=(50,),
+                ),
+            )
+            prediction = self.model(batch.to("cuda")).surf_vars['vil']
+            predictions.append(prediction)
+
+            model_input = torch.cat([model_input[:,-1:,], frames_out[:,i:i+1]], dim=1)
+        
+        predictions = torch.cat(predictions, dim=1)
+        loss = F.mse_loss(predictions, frames_out, reduction = 'mean')
+
         return loss
         
     
@@ -509,7 +511,6 @@ def main():
     args = create_parser()
     exp = Runner(args)
     if not args.eval:
-        exp.load(args.ckpt_milestone, continue_training=args.continue_train)
         exp.train()
     else:
         exp.check_milestones(target_ckpt=args.ckpt_milestone)
