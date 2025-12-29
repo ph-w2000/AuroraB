@@ -74,15 +74,15 @@ def vis_res(input_seq, pred_seq, gt_seq, save_path, data_type='vil',
             for idx, i in enumerate(colored_input)
         ], axis=-2)
     ], axis=-3)
-    grid_input = np.pad(grid_input, ((0, 0), (0, 1069), (0, 0)), mode='constant', constant_values=0)
-    # grid_input = np.pad(grid_input, ((0, 0), (0, 5), (0, 0)), mode='constant', constant_values=0)
+    grid_input = np.pad(grid_input, ((0, 0), (0, 2394), (0, 0)), mode='constant', constant_values=0)
+    # grid_input = np.pad(grid_input, ((0, 0), (0, 1069), (0, 0)), mode='constant', constant_values=0)
 
 
     # Concatenate with separator in between for grid_pred
     grid_pred = np.concatenate([
         np.concatenate([
             np.concatenate([i, separator], axis=-2) if idx < len(colored_pred) - 1 else i
-            for idx, i in enumerate(colored_pred) if idx % 2 == 0
+            for idx, i in enumerate(colored_pred) if idx % 2 >= 0
         ], axis=-2)
     ], axis=-3)
 
@@ -90,7 +90,7 @@ def vis_res(input_seq, pred_seq, gt_seq, save_path, data_type='vil',
     grid_gt = np.concatenate([
         np.concatenate([
             np.concatenate([i, separator], axis=-2) if idx < len(colored_gt) - 1 else i
-            for idx, i in enumerate(colored_gt) if idx % 2 == 0
+            for idx, i in enumerate(colored_gt) if idx % 2 >= 0
         ], axis=-2)
     ], axis=-3)
 

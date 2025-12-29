@@ -228,14 +228,27 @@ class Runner(object):
 
         locations["vil"] = 0.0
         scales["vil"] = 1.0
+
+        # for name, param in model.named_parameters():
+        #     # Check if 'backbone' is at the start of the parameter name
+        #     if name.startswith("backbone") or \
+        #        name.startswith("encoder._checkpoint_wrapped_module.atmos") or \
+        #        name.startswith("encoder._checkpoint_wrapped_module.level_agg") or \
+        #        name.startswith("decoder._checkpoint_wrapped_module.level_decoder") :
+        #        param.requires_grad = False
+
+
+        # for name, param in model.named_parameters():
+        #     if param.requires_grad:
+        #         print(name)
+
                                 
         self.model = model.to(self.device)
         self.ema = EMA(self.model, beta=self.args.ema_rate, update_every=20).to(self.device)        
         
         if self.is_main:
-            total = sum([param.nelement() for param in self.model.parameters()])
+            total = sum([param.nelement() for param in self.model.parameters() if param.requires_grad])
             print_log("Main Model Parameters: %.2fM" % (total/1e6), self.is_main)
-
 
     def _build_optimizer(self):
         # =================================
@@ -304,8 +317,8 @@ class Runner(object):
             'epoch': self.cur_epoch,
             'model': self.accelerator.get_state_dict(self.model),
             'ema': self.ema.state_dict(),
-            'opt': self.optimizer.state_dict(),
-            'scheduler': self.scheduler.state_dict(),
+            # 'opt': self.optimizer.state_dict(),
+            # 'scheduler': self.scheduler.state_dict(),
 
         }
         
@@ -468,10 +481,10 @@ class Runner(object):
                     ),
                 )
 
-                prediction = self.model(aurora_batch.to("cuda")).surf_vars['vil']
-                predictions.append(prediction.clamp(0,1).to("cpu"))
+                prediction = self.model(aurora_batch.to("cuda")).surf_vars['vil'].clamp(0,1)
+                predictions.append(prediction.to("cpu"))
 
-                model_input = torch.cat([model_input[:,-1:,], prediction[:,:]], dim=1)
+                model_input = torch.cat([model_input[:,-1:,], prediction], dim=1)
 
             predictions = torch.cat(predictions, dim=1)
         
