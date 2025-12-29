@@ -1,5 +1,5 @@
 import os
-# os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 import os.path as osp
 import math
 import time
@@ -26,7 +26,7 @@ from diffusers import (
 from datasets.get_datasets import get_dataset
 from utils.metrics import Evaluator
 from utils.tools import print_log, cycle, show_img_info
-from aurora import AuroraSmallPretrained, AuroraPretrained, Batch, Metadata
+from aurora import AuroraSmallPretrained, AuroraPretrained, Batch, Metadata, rollout
 from aurora.normalisation import locations, scales
 from datetime import datetime, timedelta
 os.environ["ACCELERATE_DEBUG_MODE"] = "1"
@@ -36,8 +36,6 @@ def create_parser():
     parser = argparse.ArgumentParser()    
     parser.add_argument("--seed",           type=int,   default=0,              help='Experiment seed')
     parser.add_argument("--exp_dir",        type=str,   default='basic_exps',   help="experiment directory")
-    parser.add_argument("--exp_note",       type=str,   default=None,           help="additional note for experiment")
-
 
     # --------------- Dataset ---------------
     parser.add_argument("--dataset",        type=str,   default='sevir',        help="dataset name")
@@ -60,15 +58,15 @@ def create_parser():
     parser.add_argument("--grad_acc_step",  type=int,   default=1,               help="gradient accumulation step")
     
     # --------------- Training ---------------
-    parser.add_argument("--batch_size",     type=int,   default=3,              help="batch size")
-    parser.add_argument("--epochs",         type=int,   default=40,              help="number of epochs")
+    parser.add_argument("--batch_size",     type=int,   default=12,              help="batch size")
+    parser.add_argument("--epochs",         type=int,   default=2,              help="number of epochs")
     parser.add_argument("--training_steps", type=int,   default=200000,          help="number of training steps")
     parser.add_argument("--early_stop",     type=int,   default=10,              help="early stopping steps")
     parser.add_argument("--ckpt_milestone", type=str,   default=None,            help="resumed checkpoint milestone")
     
     # --------------- Additional Ablation Configs ---------------
     parser.add_argument("--eval",           action="store_true",                 help="evaluation mode")
-    parser.add_argument("--wandb_state", type=str, default='disabled', help="wandb state config")
+    parser.add_argument("--wandb_state", type=str, default='online', help="wandb state config")
     parser.add_argument("--continue_train",           action="store_true",)
 
     args = parser.parse_args()
@@ -97,17 +95,6 @@ class Runner(object):
             log_with        =   'wandb'
         )
         
-        # Config log tracker 'wandb' from accelerate
-        self.accelerator.init_trackers(
-            project_name=self.exp_name,
-            config=self.args.__dict__,
-            init_kwargs={"wandb": 
-                {
-                "mode": self.args.wandb_state,
-                # 'resume': self.args.ckpt_milestone
-                }
-                         }   # disabled, online, offline
-        )
         
         print_log('============================================================', self.is_main)
         print_log("                 Experiment Start                           ", self.is_main)
@@ -153,8 +140,8 @@ class Runner(object):
         # =================================
 
         set_seed(self.args.seed)
-        self.model_name = 'DuoCast'
-        self.exp_name   = f"{self.model_name}_{self.args.dataset}_{self.args.exp_note}"
+        self.model_name = 'Aurora_Small_Pretrained'
+        self.exp_name   = f"{self.model_name}_{self.args.dataset}_full"
         
         cur_dir         = os.path.dirname(os.path.abspath(__file__))
         
@@ -211,7 +198,7 @@ class Runner(object):
                 valid_data, batch_size=self.args.batch_size, shuffle=False, num_workers=self.args.num_workers, drop_last=True
             )
             self.test_loader = torch.utils.data.DataLoader(
-                test_data, batch_size=self.args.batch_size , shuffle=False, num_workers=self.args.num_workers
+                test_data, batch_size=3 , shuffle=False, num_workers=self.args.num_workers
             )
         else:
             self.train_loader = train_data.get_torch_dataloader(num_workers=self.args.num_workers)
@@ -242,7 +229,7 @@ class Runner(object):
         locations["vil"] = 0.0
         scales["vil"] = 1.0
                                 
-        self.model = model
+        self.model = model.to(self.device)
         self.ema = EMA(self.model, beta=self.args.ema_rate, update_every=20).to(self.device)        
         
         if self.is_main:
@@ -355,6 +342,16 @@ class Runner(object):
     
     def train(self):
         # set global step as traing process
+        self.accelerator.init_trackers(
+            project_name=self.exp_name,
+            config=self.args.__dict__,
+            init_kwargs={"wandb": 
+                {
+                "mode": self.args.wandb_state,
+                # 'resume': self.args.ckpt_milestone
+                }
+                         }   # disabled, online, offline
+        )
         pbar = tqdm(
             initial=self.cur_step,
             total=self.global_steps,
@@ -372,11 +369,11 @@ class Runner(object):
                     loss = self._train_batch(batch)
                     self.accelerator.backward(loss)
                     
-                    if self.cur_step == 0:
-                        # training process check
-                        for name, param in self.model.named_parameters():
-                            if param.grad is None:
-                                print_log(name, self.is_main)
+                    # if self.cur_step == 0:
+                    #     # training process check
+                    #     for name, param in self.model.named_parameters():
+                    #         if param.grad is None:
+                    #             print_log(name, self.is_main)
 
                 wandb.log({'loss':(loss.detach().item()), 
                         'epoch':epoch,
@@ -440,7 +437,7 @@ class Runner(object):
                 ),
             )
             prediction = self.model(batch.to("cuda")).surf_vars['vil']
-            predictions.append(prediction)
+            predictions.append(prediction.clamp(0,1))
 
             model_input = torch.cat([model_input[:,-1:,], frames_out[:,i:i+1]], dim=1)
         
@@ -452,17 +449,37 @@ class Runner(object):
     
     @torch.no_grad()
     def _sample_batch(self, batch, use_ema=False):
-        
-        sample_fn = self.ema.ema_model.predict if use_ema else self.model.predict
+        radar_batch, metadata = self._get_seq_data(batch)
         frame_in = self.args.frames_in
-        radar_batch = self._get_seq_data(batch)
-        radar_input, radar_gt = radar_batch[:,:frame_in], radar_batch[:,frame_in:]
-        radar_pred, _ = sample_fn(radar_input, compute_loss=False)
-        
-        radar_gt = self.accelerator.gather(radar_gt).detach().cpu().numpy()
-        radar_pred = self.accelerator.gather(radar_pred).detach().cpu().numpy()
+        frames_in, frames_out = radar_batch[:,:self.args.frames_in], radar_batch[:,self.args.frames_in:]
+        with torch.inference_mode():
+            predictions = []
+            model_input = frames_in
+            for i in range(self.args.frames_out):
+                aurora_batch = Batch(
+                    surf_vars={"vil": model_input},
+                    static_vars={},
+                    atmos_vars={},
+                    metadata=Metadata(
+                        lat=torch.linspace(metadata['urcrnrlat'][0], metadata['llcrnrlat'][0], self.args.img_size),
+                        lon=torch.linspace(metadata['llcrnrlon'][0]%360, metadata['urcrnrlon'][0]%360, self.args.img_size + 1)[:-1],
+                        time=tuple((t+pd.Timedelta(minutes=5 * i)).to_pydatetime() for t in metadata['time_utc']),
+                        atmos_levels=(50,),
+                    ),
+                )
 
-        return radar_gt, radar_pred
+                prediction = self.model(aurora_batch.to("cuda")).surf_vars['vil']
+                predictions.append(prediction.clamp(0,1).to("cpu"))
+
+                model_input = torch.cat([model_input[:,-1:,], prediction[:,:]], dim=1)
+
+            predictions = torch.cat(predictions, dim=1)
+        
+            radar_gt = self.accelerator.gather(frames_out).detach().cpu().numpy()
+            radar_pred = self.accelerator.gather(predictions).numpy()
+            radar_input = self.accelerator.gather(frames_in).detach().cpu().numpy()
+
+        return radar_input, radar_gt, radar_pred
     
     
     def test_samples(self, milestone, do_test=False):
@@ -482,17 +499,20 @@ class Runner(object):
                 save_path=save_dir,
             )
         # start test loop
+        cnt = 0
         for batch in tqdm(data_loader,desc='Test Samples', disable=not self.is_main):
             # sample
-            radar_ori, radar_recon= self._sample_batch(batch)
+            radar_input, radar_ori, radar_recon= self._sample_batch(batch)
             # evaluate result and save
             eval.evaluate(radar_ori, radar_recon)
-            if self.is_main:
-                for i in range(radar_ori.shape[0]):
-                    self.visiual_save_fn(radar_recon[i], radar_ori[i], osp.join(save_dir, f"{cnt}-{i}/vil"),data_type='vil')
+
+            if cnt == 0:
+                if self.is_main:
+                    for i in range(radar_ori.shape[0]):
+                        self.visiual_save_fn(radar_input[i], radar_recon[i], radar_ori[i], osp.join(save_dir, f"{cnt}-{i}"),data_type='vil')
 
             self.accelerator.wait_for_everyone()
-            # cnt += 1
+            cnt += 1
             # if cnt > 10:
             #     break
         # test done
