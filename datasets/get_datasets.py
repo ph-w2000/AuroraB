@@ -161,8 +161,7 @@ def get_dataset(data_name, img_size, seq_len, **kwargs):
         train_valid_split = (2019, 1, 1)
         valid_test_split = (2019, 6, 1)
         batch_size = kwargs.get('batch_size', 1)
-
-        stride = 2
+        stride = kwargs.get('stride', 13)
         
         train = SEVIRTorchDataset(
             dataset_dir=DATAPATH[data_name],

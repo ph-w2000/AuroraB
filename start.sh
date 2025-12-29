@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=0,1,2,3 accelerate launch --main_process_port 12311 run.py 

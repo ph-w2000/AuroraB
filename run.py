@@ -1,5 +1,5 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
 import os.path as osp
 import math
 import time
@@ -58,15 +58,17 @@ def create_parser():
     parser.add_argument("--grad_acc_step",  type=int,   default=1,               help="gradient accumulation step")
     
     # --------------- Training ---------------
-    parser.add_argument("--batch_size",     type=int,   default=12,              help="batch size")
-    parser.add_argument("--epochs",         type=int,   default=2,              help="number of epochs")
+    parser.add_argument("--stride",         type=int,   default=13,               help="stride")
+    parser.add_argument("--batch_size",     type=int,   default=3,              help="batch size")
+
+    parser.add_argument("--epochs",         type=int,   default=2,               help="number of epochs")
     parser.add_argument("--training_steps", type=int,   default=200000,          help="number of training steps")
     parser.add_argument("--early_stop",     type=int,   default=10,              help="early stopping steps")
     parser.add_argument("--ckpt_milestone", type=str,   default=None,            help="resumed checkpoint milestone")
     
     # --------------- Additional Ablation Configs ---------------
     parser.add_argument("--eval",           action="store_true",                 help="evaluation mode")
-    parser.add_argument("--wandb_state", type=str, default='online', help="wandb state config")
+    parser.add_argument("--wandb_state", type=str, default='disabled', help="wandb state config")
     parser.add_argument("--continue_train",           action="store_true",)
 
     args = parser.parse_args()
@@ -183,6 +185,7 @@ class Runner(object):
             img_size=self.args.img_size,
             seq_len=self.args.seq_len,
             batch_size=self.args.batch_size,
+            stride=self.args.stride,
         )
         
         self.visiual_save_fn = color_save_fn
@@ -229,13 +232,18 @@ class Runner(object):
         locations["vil"] = 0.0
         scales["vil"] = 1.0
 
-        # for name, param in model.named_parameters():
-        #     # Check if 'backbone' is at the start of the parameter name
-        #     if name.startswith("backbone") or \
-        #        name.startswith("encoder._checkpoint_wrapped_module.atmos") or \
-        #        name.startswith("encoder._checkpoint_wrapped_module.level_agg") or \
-        #        name.startswith("decoder._checkpoint_wrapped_module.level_decoder") :
-        #        param.requires_grad = False
+        for name, param in model.named_parameters():
+            # Check if 'backbone' is at the start of the parameter name
+            # if name.startswith("backbone"):
+            #    name.startswith("encoder._checkpoint_wrapped_module.atmos") or \
+            #    name.startswith("encoder._checkpoint_wrapped_module.level_agg") or \
+            #    name.startswith("decoder._checkpoint_wrapped_module.level_decoder") :
+            #    param.requires_grad = False
+
+            if name.startswith("encoder._checkpoint_wrapped_module.atmos") or \
+               name.startswith("encoder._checkpoint_wrapped_module.level_agg") or \
+               name.startswith("decoder._checkpoint_wrapped_module.level_decoder") :
+                param.requires_grad = False
 
 
         # for name, param in model.named_parameters():
@@ -354,26 +362,24 @@ class Runner(object):
         
     
     def train(self):
-        # set global step as traing process
-        self.accelerator.init_trackers(
-            project_name=self.exp_name,
-            config=self.args.__dict__,
-            init_kwargs={"wandb": 
-                {
-                "mode": self.args.wandb_state,
-                # 'resume': self.args.ckpt_milestone
-                }
-                         }   # disabled, online, offline
-        )
+        if self.accelerator.is_main_process:
+            os.environ["WANDB_MODE"] = self.args.wandb_state
+            os.environ["WANDB_DIR"] = self.exp_dir 
+            now = datetime.now().strftime("%Y-%m-%d_%H-%M")
+            wandb.init(project="Aurora", name=self.exp_name+"_"+now, config={})
+            wandb.config.update(self.args) 
+
+        tqdm_total = math.ceil(self.global_steps / self.accelerator.num_processes)
         pbar = tqdm(
             initial=self.cur_step,
-            total=self.global_steps,
+            total=tqdm_total,
             disable=not self.is_main,
         )
         start_epoch = self.cur_epoch
+        self.model.train()
+
         for epoch in range(start_epoch, self.global_epochs):
             self.cur_epoch = epoch
-            self.model.train()
             
             for i, batch in enumerate(self.train_loader):
                 # train the model with mixed_precision
@@ -387,11 +393,7 @@ class Runner(object):
                     #     for name, param in self.model.named_parameters():
                     #         if param.grad is None:
                     #             print_log(name, self.is_main)
-
-                wandb.log({'loss':(loss.detach().item()), 
-                        'epoch':epoch,
-                        'steps':self.cur_step}) 
-    
+        
                 self.accelerator.wait_for_everyone()
                 if self.accelerator.sync_gradients:
                     self.accelerator.clip_grad_norm_(self.model.parameters(), 1.0)
@@ -416,6 +418,11 @@ class Runner(object):
                 if i % 20 == 0:
                     logging.info(state_str+'::'+str(log_dict))
                 self.ema.update()
+
+                if self.accelerator.is_main_process:
+                    wandb.log({'loss':(loss.detach().item()), 
+                            'epoch':epoch,
+                            'steps':self.cur_step}) 
 
                 self.cur_step += 1
                 pbar.update(1)
