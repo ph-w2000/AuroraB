@@ -1,5 +1,4 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
 import os.path as osp
 import math
 import time
@@ -61,14 +60,14 @@ def create_parser():
     parser.add_argument("--stride",         type=int,   default=13,               help="stride")
     parser.add_argument("--batch_size",     type=int,   default=3,              help="batch size")
 
-    parser.add_argument("--epochs",         type=int,   default=2,               help="number of epochs")
+    parser.add_argument("--epochs",         type=int,   default=5,               help="number of epochs")
     parser.add_argument("--training_steps", type=int,   default=200000,          help="number of training steps")
     parser.add_argument("--early_stop",     type=int,   default=10,              help="early stopping steps")
     parser.add_argument("--ckpt_milestone", type=str,   default=None,            help="resumed checkpoint milestone")
     
     # --------------- Additional Ablation Configs ---------------
     parser.add_argument("--eval",           action="store_true",                 help="evaluation mode")
-    parser.add_argument("--wandb_state", type=str, default='disabled', help="wandb state config")
+    parser.add_argument("--wandb_state", type=str, default='online', help="wandb state config")
     parser.add_argument("--continue_train",           action="store_true",)
 
     args = parser.parse_args()
@@ -266,8 +265,7 @@ class Runner(object):
         num_epoch = math.ceil(self.args.training_steps / num_steps_per_epoch)
         self.global_epochs = self.args.epochs
         self.global_steps = self.global_epochs * num_steps_per_epoch
-        self.steps_per_epoch = num_steps_per_epoch
-        
+        self.steps_per_epoch = math.ceil(num_steps_per_epoch / self.accelerator.num_processes)
         self.cur_step, self.cur_epoch = 0, 0
 
         warmup_steps = self.args.warmup_steps
@@ -526,7 +524,7 @@ class Runner(object):
             # evaluate result and save
             eval.evaluate(radar_ori, radar_recon)
 
-            if cnt == 0:
+            if cnt >= 0:
                 if self.is_main:
                     for i in range(radar_ori.shape[0]):
                         self.visiual_save_fn(radar_input[i], radar_recon[i], radar_ori[i], osp.join(save_dir, f"{cnt}-{i}"),data_type='vil')
