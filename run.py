@@ -233,11 +233,14 @@ class Runner(object):
 
         for name, param in model.named_parameters():
             # Check if 'backbone' is at the start of the parameter name
-            # if name.startswith("backbone") or \
-            #    name.startswith("encoder._checkpoint_wrapped_module.atmos") or \
+            # if name.startswith("encoder._checkpoint_wrapped_module.atmos") or \
             #    name.startswith("encoder._checkpoint_wrapped_module.level_agg") or \
             #    name.startswith("decoder._checkpoint_wrapped_module.level_decoder") :
             #    param.requires_grad = False
+            
+            # if name.startswith("backbone") and "lora_" not in name:
+            #     param.requires_grad = False
+               
 
             if name.startswith("encoder._checkpoint_wrapped_module.atmos") or \
                name.startswith("encoder._checkpoint_wrapped_module.level_agg") or \
@@ -437,25 +440,26 @@ class Runner(object):
         return batch      # [B, T, C, H, W]
     
     def _train_batch(self, batch):
-        radar_batch, metadata = self._get_seq_data(batch)
+        radar_batch, input_metadata = self._get_seq_data(batch)
         frames_in, frames_out = radar_batch[:,:self.args.frames_in], radar_batch[:,self.args.frames_in:]
         assert radar_batch.shape[1] == self.args.frames_out + self.args.frames_in, "radar sequence length error"
 
         predictions = []
         model_input = frames_in
         for i in range(self.args.frames_out):
-            batch = Batch(
+            aurora_batch = Batch(
                 surf_vars={"vil": model_input},
                 static_vars={},
                 atmos_vars={},
                 metadata=Metadata(
-                    lat=torch.linspace(metadata['urcrnrlat'][0], metadata['llcrnrlat'][0], self.args.img_size),
-                    lon=torch.linspace(metadata['llcrnrlon'][0]%360, metadata['urcrnrlon'][0]%360, self.args.img_size + 1)[:-1],
-                    time=tuple((t+pd.Timedelta(minutes=5 * i)).to_pydatetime() for t in metadata['time_utc']),
+                    lat=torch.linspace(input_metadata['urcrnrlat'][0], input_metadata['llcrnrlat'][0], self.args.img_size),
+                    lon=torch.linspace(input_metadata['llcrnrlon'][0]%360, input_metadata['urcrnrlon'][0]%360, self.args.img_size + 1)[:-1],
+                    time=tuple((t+pd.Timedelta(minutes=5 * i)).to_pydatetime() for t in input_metadata['time_utc']),
                     atmos_levels=(50,),
+                    rollout_step=i,
                 ),
             )
-            prediction = self.model(batch.to("cuda")).surf_vars['vil']
+            prediction = self.model(aurora_batch.to(self.device)).surf_vars['vil']
             predictions.append(prediction.clamp(0,1))
 
             model_input = torch.cat([model_input[:,-1:,], frames_out[:,i:i+1]], dim=1)
@@ -468,8 +472,7 @@ class Runner(object):
     
     @torch.no_grad()
     def _sample_batch(self, batch, use_ema=False):
-        radar_batch, metadata = self._get_seq_data(batch)
-        frame_in = self.args.frames_in
+        radar_batch, input_metadata = self._get_seq_data(batch)
         frames_in, frames_out = radar_batch[:,:self.args.frames_in], radar_batch[:,self.args.frames_in:]
         with torch.inference_mode():
             predictions = []
@@ -480,14 +483,15 @@ class Runner(object):
                     static_vars={},
                     atmos_vars={},
                     metadata=Metadata(
-                        lat=torch.linspace(metadata['urcrnrlat'][0], metadata['llcrnrlat'][0], self.args.img_size),
-                        lon=torch.linspace(metadata['llcrnrlon'][0]%360, metadata['urcrnrlon'][0]%360, self.args.img_size + 1)[:-1],
-                        time=tuple((t+pd.Timedelta(minutes=5 * i)).to_pydatetime() for t in metadata['time_utc']),
+                        lat=torch.linspace(input_metadata['urcrnrlat'][0], input_metadata['llcrnrlat'][0], self.args.img_size),
+                        lon=torch.linspace(input_metadata['llcrnrlon'][0]%360, input_metadata['urcrnrlon'][0]%360, self.args.img_size + 1)[:-1],
+                        time=tuple((t+pd.Timedelta(minutes=5 * i)).to_pydatetime() for t in input_metadata['time_utc']),
                         atmos_levels=(50,),
+                        rollout_step=i,
                     ),
                 )
 
-                prediction = self.model(aurora_batch.to("cuda")).surf_vars['vil'].clamp(0,1)
+                prediction = self.model(aurora_batch.to(self.device)).surf_vars['vil'].clamp(0,1)
                 predictions.append(prediction.to("cpu"))
 
                 model_input = torch.cat([model_input[:,-1:,], prediction], dim=1)
