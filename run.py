@@ -49,9 +49,9 @@ def create_parser():
     parser.add_argument("--lr",             type=float, default=3e-4,            help="learning rate")
     parser.add_argument("--lr-beta1",       type=float, default=0.90,            help="learning rate beta 1")
     parser.add_argument("--lr-beta2",       type=float, default=0.95,            help="learning rate beta 2")
-    parser.add_argument("--l2-norm",        type=float, default=0.0,             help="l2 norm weight decay")
+    parser.add_argument("--l2-norm",        type=float, default=5e-6,            help="l2 norm weight decay")
     parser.add_argument("--ema_rate",       type=float, default=0.95,            help="exponential moving average rate")
-    parser.add_argument("--scheduler",      type=str,   default='constant',        help="learning rate scheduler", choices=['constant', 'linear', 'cosine'])
+    parser.add_argument("--scheduler",      type=str,   default='cosine',        help="learning rate scheduler", choices=['constant', 'linear', 'cosine'])
     parser.add_argument("--warmup_steps",   type=int,   default=1000,            help="warmup steps")
     parser.add_argument("--mixed_precision",type=str,   default='no',            help="mixed precision training")
     parser.add_argument("--grad_acc_step",  type=int,   default=1,               help="gradient accumulation step")
@@ -233,7 +233,7 @@ class Runner(object):
 
         for name, param in model.named_parameters():
             # Check if 'backbone' is at the start of the parameter name
-            # if name.startswith("backbone"):
+            # if name.startswith("backbone") or \
             #    name.startswith("encoder._checkpoint_wrapped_module.atmos") or \
             #    name.startswith("encoder._checkpoint_wrapped_module.level_agg") or \
             #    name.startswith("decoder._checkpoint_wrapped_module.level_decoder") :
@@ -418,7 +418,8 @@ class Runner(object):
                 self.ema.update()
 
                 if self.accelerator.is_main_process:
-                    wandb.log({'loss':(loss.detach().item()), 
+                    wandb.log({'loss':(loss.detach().item()),
+                                'lr':lr, 
                             'epoch':epoch,
                             'steps':self.cur_step}) 
 
@@ -460,7 +461,7 @@ class Runner(object):
             model_input = torch.cat([model_input[:,-1:,], frames_out[:,i:i+1]], dim=1)
         
         predictions = torch.cat(predictions, dim=1)
-        loss = F.mse_loss(predictions, frames_out, reduction = 'mean')
+        loss = F.l1_loss(predictions, frames_out, reduction = 'mean')
 
         return loss
         
