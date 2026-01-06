@@ -456,7 +456,6 @@ class Runner(object):
                     lon=torch.linspace(input_metadata['llcrnrlon'][0]%360, input_metadata['urcrnrlon'][0]%360, self.args.img_size + 1)[:-1],
                     time=tuple((t+pd.Timedelta(minutes=5 * i)).to_pydatetime() for t in input_metadata['time_utc']),
                     atmos_levels=(50,),
-                    rollout_step=i,
                 ),
             )
             prediction = self.model(aurora_batch.to(self.device)).surf_vars['vil']
@@ -487,7 +486,6 @@ class Runner(object):
                         lon=torch.linspace(input_metadata['llcrnrlon'][0]%360, input_metadata['urcrnrlon'][0]%360, self.args.img_size + 1)[:-1],
                         time=tuple((t+pd.Timedelta(minutes=5 * i)).to_pydatetime() for t in input_metadata['time_utc']),
                         atmos_levels=(50,),
-                        rollout_step=i,
                     ),
                 )
 
