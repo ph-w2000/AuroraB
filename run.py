@@ -142,7 +142,7 @@ class Runner(object):
 
         set_seed(self.args.seed)
         self.model_name = 'Aurora_Small_Pretrained'
-        self.exp_name   = f"{self.model_name}_{self.args.dataset}_full"
+        self.exp_name   = f"{self.model_name}_{self.args.dataset}_lora"
         
         cur_dir         = os.path.dirname(os.path.abspath(__file__))
         
@@ -224,6 +224,7 @@ class Runner(object):
             atmos_vars=None,
             timestep=timedelta(hours=0.0833333),
             autocast=True,
+            use_lora=True,
         )
         model.load_checkpoint(strict=False)
         model.configure_activation_checkpointing()
@@ -233,18 +234,12 @@ class Runner(object):
 
         for name, param in model.named_parameters():
             # Check if 'backbone' is at the start of the parameter name
-            # if name.startswith("encoder._checkpoint_wrapped_module.atmos") or \
-            #    name.startswith("encoder._checkpoint_wrapped_module.level_agg") or \
-            #    name.startswith("decoder._checkpoint_wrapped_module.level_decoder") :
-            #    param.requires_grad = False
-            
-            # if name.startswith("backbone") and "lora_" not in name:
-            #     param.requires_grad = False
-               
-
             if name.startswith("encoder._checkpoint_wrapped_module.atmos") or \
                name.startswith("encoder._checkpoint_wrapped_module.level_agg") or \
                name.startswith("decoder._checkpoint_wrapped_module.level_decoder") :
+               param.requires_grad = False
+            
+            if name.startswith("backbone") and "lora_" not in name:
                 param.requires_grad = False
 
 
