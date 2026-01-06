@@ -233,20 +233,14 @@ class Runner(object):
 
         for name, param in model.named_parameters():
             # Check if 'backbone' is at the start of the parameter name
-            # if name.startswith("encoder._checkpoint_wrapped_module.atmos") or \
-            #    name.startswith("encoder._checkpoint_wrapped_module.level_agg") or \
-            #    name.startswith("decoder._checkpoint_wrapped_module.level_decoder") :
-            #    param.requires_grad = False
+            if name.startswith("encoder._checkpoint_wrapped_module.atmos") or \
+               name.startswith("encoder._checkpoint_wrapped_module.level_agg") or \
+               name.startswith("decoder._checkpoint_wrapped_module.level_decoder") :
+               param.requires_grad = False
             
             # if name.startswith("backbone") and "lora_" not in name:
             #     param.requires_grad = False
                
-
-            if name.startswith("encoder._checkpoint_wrapped_module.atmos") or \
-               name.startswith("encoder._checkpoint_wrapped_module.level_agg") or \
-               name.startswith("decoder._checkpoint_wrapped_module.level_decoder") :
-                param.requires_grad = False
-
 
         # for name, param in model.named_parameters():
         #     if param.requires_grad:
