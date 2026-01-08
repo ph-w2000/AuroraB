@@ -142,7 +142,7 @@ class Runner(object):
 
         set_seed(self.args.seed)
         self.model_name = 'Aurora_Small_Pretrained'
-        self.exp_name   = f"{self.model_name}_{self.args.dataset}_lora"
+        self.exp_name   = f"{self.model_name}_{self.args.dataset}_lora_r64"
         
         cur_dir         = os.path.dirname(os.path.abspath(__file__))
         
@@ -522,7 +522,7 @@ class Runner(object):
             # evaluate result and save
             eval.evaluate(radar_ori, radar_recon)
 
-            if cnt >= 0:
+            if cnt <= 5:
                 if self.is_main:
                     for i in range(radar_ori.shape[0]):
                         self.visiual_save_fn(radar_input[i], radar_recon[i], radar_ori[i], osp.join(save_dir, f"{cnt}-{i}"),data_type='vil')
