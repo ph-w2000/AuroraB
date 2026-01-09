@@ -281,7 +281,7 @@ class Perceiver3DEncoder(nn.Module):
         lat, lon = batch.metadata.lat, batch.metadata.lon
         check_lat_lon_dtype(lat, lon)
         lat, lon = lat.to(dtype=torch.float32), lon.to(dtype=torch.float32)
-        assert lat.shape[0] == H and lon.shape[-1] == W
+        assert lat.shape[-1] == H and lon.shape[-1] == W
 
         # Patch embed the surface level.
         x_surf = rearrange(x_surf, "b t v h w -> b v t h w")
@@ -333,17 +333,22 @@ class Perceiver3DEncoder(nn.Module):
         x = x_surf.unsqueeze(1)
 
         # Add position and scale embeddings to the 3D tensor.
-        pos_encode, scale_encode = pos_scale_enc(
-            self.embed_dim,
-            lat,
-            lon,
-            self.patch_size,
-            pos_expansion=pos_expansion,
-            scale_expansion=scale_expansion,
-        )
-        # Encodings are (L, D).
-        pos_encode = self.pos_embed(pos_encode[None, None, :].to(dtype=dtype))
-        scale_encode = self.scale_embed(scale_encode[None, None, :].to(dtype=dtype))
+        pos_encode_list, scale_encode_list = [], []
+        for la, lo in zip(lat, lon):
+            pos_encode, scale_encode = pos_scale_enc(
+                self.embed_dim,
+                la,
+                lo,
+                self.patch_size,
+                pos_expansion=pos_expansion,
+                scale_expansion=scale_expansion,
+            )
+            pos_encode_list.append(pos_encode)
+            scale_encode_list.append(scale_encode)
+        pos_encode = torch.stack(pos_encode_list, dim=0).unsqueeze(1)  # (B, 1, L, D)
+        scale_encode = torch.stack(scale_encode_list, dim=0).unsqueeze(1)  # (B, 1, L, D)
+        pos_encode = self.pos_embed(pos_encode.to(dtype=dtype))
+        scale_encode = self.scale_embed(scale_encode.to(dtype=dtype))
         x = x + pos_encode + scale_encode
 
         # Flatten the tokens.

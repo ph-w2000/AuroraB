@@ -58,7 +58,7 @@ def create_parser():
     
     # --------------- Training ---------------
     parser.add_argument("--stride",         type=int,   default=13,               help="stride")
-    parser.add_argument("--batch_size",     type=int,   default=3,              help="batch size")
+    parser.add_argument("--batch_size",     type=int,   default=32,              help="batch size")
 
     parser.add_argument("--epochs",         type=int,   default=5,               help="number of epochs")
     parser.add_argument("--training_steps", type=int,   default=200000,          help="number of training steps")
@@ -441,18 +441,48 @@ class Runner(object):
 
         predictions = []
         model_input = frames_in
+
+        lat_grid = torch.stack(
+            [
+                torch.linspace(
+                    input_metadata['urcrnrlat'][i],
+                    input_metadata['llcrnrlat'][i],
+                    self.args.img_size
+                )
+                for i in range(len(input_metadata['urcrnrlat']))
+            ],
+            dim=0
+        )
+
+        lon_grid = torch.stack(
+            [
+                torch.linspace(
+                    input_metadata['llcrnrlon'][i]%360,
+                    input_metadata['urcrnrlon'][i]%360,
+                    self.args.img_size + 1
+                )[:-1]
+                for i in range(len(input_metadata['llcrnrlon']))
+            ],
+            dim=0
+        )
+
+        aurora_batch = Batch(
+            surf_vars={"vil": model_input},
+            static_vars={},
+            atmos_vars={},
+            metadata=Metadata(
+                lat=lat_grid,
+                lon=lon_grid,
+                time=tuple((t+pd.Timedelta(minutes=5 * 0)).to_pydatetime() for t in input_metadata['time_utc']),
+                atmos_levels=(50,),
+            ),
+        )
+
         for i in range(self.args.frames_out):
-            aurora_batch = Batch(
-                surf_vars={"vil": model_input},
-                static_vars={},
-                atmos_vars={},
-                metadata=Metadata(
-                    lat=torch.linspace(input_metadata['urcrnrlat'][0], input_metadata['llcrnrlat'][0], self.args.img_size),
-                    lon=torch.linspace(input_metadata['llcrnrlon'][0]%360, input_metadata['urcrnrlon'][0]%360, self.args.img_size + 1)[:-1],
-                    time=tuple((t+pd.Timedelta(minutes=5 * i)).to_pydatetime() for t in input_metadata['time_utc']),
-                    atmos_levels=(50,),
-                ),
-            )
+            aurora_batch.surf_vars={"vil": model_input}
+            # aurora_batch.metadata.rollout_step = i
+            aurora_batch.metadata.time = tuple((t+pd.Timedelta(minutes=5 * i)).to_pydatetime() for t in input_metadata['time_utc'])
+
             prediction = self.model(aurora_batch.to(self.device)).surf_vars['vil']
             predictions.append(prediction.clamp(0,1))
 
@@ -471,18 +501,48 @@ class Runner(object):
         with torch.inference_mode():
             predictions = []
             model_input = frames_in
+
+            lat_grid = torch.stack(
+                [
+                    torch.linspace(
+                        input_metadata['urcrnrlat'][i],
+                        input_metadata['llcrnrlat'][i],
+                        self.args.img_size
+                    )
+                    for i in range(len(input_metadata['urcrnrlat']))
+                ],
+                dim=0
+            )
+
+            lon_grid = torch.stack(
+                [
+                    torch.linspace(
+                        input_metadata['llcrnrlon'][i]%360,
+                        input_metadata['urcrnrlon'][i]%360,
+                        self.args.img_size + 1
+                    )[:-1]
+                    for i in range(len(input_metadata['llcrnrlon']))
+                ],
+                dim=0
+            )
+
+            aurora_batch = Batch(
+                surf_vars={"vil": model_input},
+                static_vars={},
+                atmos_vars={},
+                metadata=Metadata(
+                    lat=lat_grid,
+                    lon=lon_grid,
+                    time=tuple((t+pd.Timedelta(minutes=5 * 0)).to_pydatetime() for t in input_metadata['time_utc']),
+                    atmos_levels=(50,),
+                ),
+            )
+
             for i in range(self.args.frames_out):
-                aurora_batch = Batch(
-                    surf_vars={"vil": model_input},
-                    static_vars={},
-                    atmos_vars={},
-                    metadata=Metadata(
-                        lat=torch.linspace(input_metadata['urcrnrlat'][0], input_metadata['llcrnrlat'][0], self.args.img_size),
-                        lon=torch.linspace(input_metadata['llcrnrlon'][0]%360, input_metadata['urcrnrlon'][0]%360, self.args.img_size + 1)[:-1],
-                        time=tuple((t+pd.Timedelta(minutes=5 * i)).to_pydatetime() for t in input_metadata['time_utc']),
-                        atmos_levels=(50,),
-                    ),
-                )
+                aurora_batch.surf_vars={"vil": model_input}
+                # aurora_batch.metadata.rollout_step = i
+                aurora_batch.metadata.time = tuple((t+pd.Timedelta(minutes=5 * i)).to_pydatetime() for t in input_metadata['time_utc'])
+
 
                 prediction = self.model(aurora_batch.to(self.device)).surf_vars['vil'].clamp(0,1)
                 predictions.append(prediction.to("cpu"))
