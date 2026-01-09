@@ -199,7 +199,7 @@ class Perceiver3DDecoder(nn.Module):
         lat, lon = batch.metadata.lat, batch.metadata.lon
         check_lat_lon_dtype(lat, lon)
         lat, lon = lat.to(dtype=torch.float32), lon.to(dtype=torch.float32)
-        H, W = lat.shape[0], lon.shape[-1]
+        H, W = lat.shape[-1], lon.shape[-1]
 
         # Unwrap the latent level dimension.
         x = rearrange(

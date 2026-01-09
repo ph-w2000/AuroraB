@@ -56,16 +56,16 @@ class Metadata:
                 raise ValueError("Longitudes must be strictly increasing.")
 
         # Validate matrix-valued latitudes and longitudes:
-        elif self.lat.dim() == self.lon.dim() == 2:
-            if not torch.all(self.lat[1:, :] - self.lat[:-1, :]):
-                raise ValueError("Latitudes must be strictly decreasing along every column.")
-            if not torch.all(self.lon[:, 1:] - self.lon[:, :-1] > 0):
-                raise ValueError("Longitudes must be strictly increasing along every row.")
+        # elif self.lat.dim() == self.lon.dim() == 2:
+        #     if not torch.all(self.lat[1:, :] - self.lat[:-1, :]):
+        #         raise ValueError("Latitudes must be strictly decreasing along every column.")
+        #     if not torch.all(self.lon[:, 1:] - self.lon[:, :-1] > 0):
+        #         raise ValueError("Longitudes must be strictly increasing along every row.")
 
-        else:
-            raise ValueError(
-                "The latitudes and longitudes must either both be vectors or both be matrices."
-            )
+        # else:
+        #     raise ValueError(
+        #         "The latitudes and longitudes must either both be vectors or both be matrices."
+        #     )
 
 
 @dataclasses.dataclass
