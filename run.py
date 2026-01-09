@@ -46,12 +46,12 @@ def create_parser():
     parser.add_argument("--num_workers",    type=int,   default=8,              help="number of workers for data loader")
     
     # --------------- Optimizer ---------------
-    parser.add_argument("--lr",             type=float, default=3e-4,            help="learning rate")
+    parser.add_argument("--lr",             type=float, default=1e-4,            help="learning rate")
     parser.add_argument("--lr-beta1",       type=float, default=0.90,            help="learning rate beta 1")
     parser.add_argument("--lr-beta2",       type=float, default=0.95,            help="learning rate beta 2")
-    parser.add_argument("--l2-norm",        type=float, default=5e-6,            help="l2 norm weight decay")
+    parser.add_argument("--l2-norm",        type=float, default=0,            help="l2 norm weight decay")
     parser.add_argument("--ema_rate",       type=float, default=0.95,            help="exponential moving average rate")
-    parser.add_argument("--scheduler",      type=str,   default='cosine',        help="learning rate scheduler", choices=['constant', 'linear', 'cosine'])
+    parser.add_argument("--scheduler",      type=str,   default='constant',        help="learning rate scheduler", choices=['constant', 'linear', 'cosine'])
     parser.add_argument("--warmup_steps",   type=int,   default=1000,            help="warmup steps")
     parser.add_argument("--mixed_precision",type=str,   default='no',            help="mixed precision training")
     parser.add_argument("--grad_acc_step",  type=int,   default=1,               help="gradient accumulation step")
@@ -142,7 +142,7 @@ class Runner(object):
 
         set_seed(self.args.seed)
         self.model_name = 'Aurora_Small_Pretrained'
-        self.exp_name   = f"{self.model_name}_{self.args.dataset}_lora_r64"
+        self.exp_name   = f"{self.model_name}_{self.args.dataset}_lora_r8_time_emb"
         
         cur_dir         = os.path.dirname(os.path.abspath(__file__))
         
@@ -239,7 +239,7 @@ class Runner(object):
                name.startswith("decoder._checkpoint_wrapped_module.level_decoder") :
                param.requires_grad = False
             
-            if name.startswith("backbone") and "lora_" not in name:
+            if name.startswith("backbone") and "time_mlp" not in name and "lora_" not in name:
                 param.requires_grad = False
 
 
