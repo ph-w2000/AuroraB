@@ -46,21 +46,21 @@ def create_parser():
     parser.add_argument("--num_workers",    type=int,   default=8,              help="number of workers for data loader")
     
     # --------------- Optimizer ---------------
-    parser.add_argument("--lr",             type=float, default=1e-4,            help="learning rate")
+    parser.add_argument("--lr",             type=float, default=2e-3,            help="learning rate")
     parser.add_argument("--lr-beta1",       type=float, default=0.90,            help="learning rate beta 1")
     parser.add_argument("--lr-beta2",       type=float, default=0.95,            help="learning rate beta 2")
-    parser.add_argument("--l2-norm",        type=float, default=0,            help="l2 norm weight decay")
+    parser.add_argument("--l2-norm",        type=float, default=3e-5,            help="l2 norm weight decay")
     parser.add_argument("--ema_rate",       type=float, default=0.95,            help="exponential moving average rate")
-    parser.add_argument("--scheduler",      type=str,   default='constant',        help="learning rate scheduler", choices=['constant', 'linear', 'cosine'])
+    parser.add_argument("--scheduler",      type=str,   default='cosine',        help="learning rate scheduler", choices=['constant', 'linear', 'cosine'])
     parser.add_argument("--warmup_steps",   type=int,   default=1000,            help="warmup steps")
     parser.add_argument("--mixed_precision",type=str,   default='no',            help="mixed precision training")
     parser.add_argument("--grad_acc_step",  type=int,   default=1,               help="gradient accumulation step")
     
     # --------------- Training ---------------
     parser.add_argument("--stride",         type=int,   default=13,               help="stride")
-    parser.add_argument("--batch_size",     type=int,   default=32,              help="batch size")
+    parser.add_argument("--batch_size",     type=int,   default=16,              help="batch size")
 
-    parser.add_argument("--epochs",         type=int,   default=5,               help="number of epochs")
+    parser.add_argument("--epochs",         type=int,   default=10,               help="number of epochs")
     parser.add_argument("--training_steps", type=int,   default=200000,          help="number of training steps")
     parser.add_argument("--early_stop",     type=int,   default=10,              help="early stopping steps")
     parser.add_argument("--ckpt_milestone", type=str,   default=None,            help="resumed checkpoint milestone")
