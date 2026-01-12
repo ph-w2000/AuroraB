@@ -60,7 +60,7 @@ def create_parser():
     parser.add_argument("--stride",         type=int,   default=13,               help="stride")
     parser.add_argument("--batch_size",     type=int,   default=16,              help="batch size")
 
-    parser.add_argument("--epochs",         type=int,   default=10,               help="number of epochs")
+    parser.add_argument("--epochs",         type=int,   default=20,               help="number of epochs")
     parser.add_argument("--training_steps", type=int,   default=200000,          help="number of training steps")
     parser.add_argument("--early_stop",     type=int,   default=10,              help="early stopping steps")
     parser.add_argument("--ckpt_milestone", type=str,   default=None,            help="resumed checkpoint milestone")
