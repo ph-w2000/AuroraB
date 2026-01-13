@@ -224,7 +224,7 @@ class Runner(object):
             atmos_vars=None,
             timestep=timedelta(hours=0.0833333),
             autocast=True,
-            use_lora=True,
+            use_lora=False,
         )
         model.load_checkpoint(strict=False)
         model.configure_activation_checkpointing()
