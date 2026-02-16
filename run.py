@@ -222,7 +222,7 @@ class Runner(object):
             surf_vars=("vil",),
             static_vars=None,
             atmos_vars=None,
-            timestep=timedelta(hours=0.0833333),
+            timestep=timedelta(seconds=300),
             autocast=True,
             use_lora=True,
         )
@@ -425,7 +425,8 @@ class Runner(object):
                 pbar.update(1)
 
             # save checkpoint and do test every epoch
-            self.save()
+            if epoch % 2 == 0 and epoch > 10:
+                self.save()
             print_log(f" ========= Finisth one Epoch ==========", self.is_main)
 
         self.accelerator.end_training()
