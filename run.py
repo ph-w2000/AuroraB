@@ -142,7 +142,7 @@ class Runner(object):
 
         set_seed(self.args.seed)
         self.model_name = 'Aurora_Small_Pretrained'
-        self.exp_name   = f"{self.model_name}_{self.args.dataset}_lora_r8_time_emb"
+        self.exp_name   = f"{self.model_name}_{self.args.dataset}_lora_freq_embed"
         
         cur_dir         = os.path.dirname(os.path.abspath(__file__))
         
@@ -425,7 +425,7 @@ class Runner(object):
                 pbar.update(1)
 
             # save checkpoint and do test every epoch
-            if epoch % 2 == 0 and epoch > 10:
+            if epoch > 10:
                 self.save()
             print_log(f" ========= Finisth one Epoch ==========", self.is_main)
 

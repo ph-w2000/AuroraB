@@ -15,6 +15,7 @@ from aurora.model.fourier import (
     levels_expansion,
     pos_expansion,
     scale_expansion,
+    frequency_expansion
 )
 from aurora.model.levelcond import LevelConditioned
 from aurora.model.patchembed import LevelPatchEmbed
@@ -27,6 +28,60 @@ from aurora.model.util import (
 
 __all__ = ["Perceiver3DEncoder"]
 
+
+class HighFreqExtractor(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.conv = nn.Conv1d(dim, dim, kernel_size=5, padding=2, groups=dim)
+        self.act = nn.GELU()
+        self.proj = nn.Linear(dim, 1)
+
+    def forward(self, x):
+        x = x.transpose(1,2)
+        hf = self.conv(x)
+        hf = self.act(hf)
+        hf = hf.transpose(1,2)
+        hf = self.proj(hf).squeeze(-1)
+        hf = torch.sigmoid(hf)
+        hf = 0.01 + hf
+        return hf
+    
+class FrequencyAwarePositionalEmbedding(nn.Module):
+    def __init__(self, embed_dim):
+        super().__init__()
+
+        self.embed_dim = embed_dim
+
+        self.freq_extractor = HighFreqExtractor(self.embed_dim)
+
+        # Structured Fourier basis
+        self.frequency_embed = nn.Linear(self.embed_dim, self.embed_dim)
+
+        # Spectral scaling (learnable)
+        self.freq_scale = nn.Parameter(torch.ones(embed_dim))
+
+        # Content-aware gating
+        self.gate_proj = nn.Linear(embed_dim, embed_dim)
+
+    def forward(self, x):
+        """
+        x: (B, L, D)
+        """
+
+        high_freq_info = self.freq_extractor(x)  # (B, L)
+
+        # Generate frequency embeddings using the pre-defined frequency expansion
+        freq_emb = self.frequency_embed(frequency_expansion(high_freq_info, self.embed_dim))
+
+        freq_emb = freq_emb * self.freq_scale[None, None, :]  # (B, L, D) * (D,) -> (B, L, D)
+
+        # Content-aware frequency gate
+        gate = torch.sigmoid(self.gate_proj(x.mean(dim=1)))
+
+
+        x = x + gate.unsqueeze(1) * freq_emb
+        return x
+    
 
 class Perceiver3DEncoder(nn.Module):
     """Multi-scale multi-source multi-variable encoder based on the Perceiver architecture."""
@@ -130,6 +185,7 @@ class Perceiver3DEncoder(nn.Module):
         self.lead_time_embed = nn.Linear(embed_dim, embed_dim)
         self.absolute_time_embed = nn.Linear(embed_dim, embed_dim)
         self.atmos_levels_embed = nn.Linear(embed_dim, embed_dim)
+        self.freq_embed = FrequencyAwarePositionalEmbedding(embed_dim=embed_dim)
 
         # Patch embeddings:
         assert max_history_size > 0, "At least one history step is required."
@@ -367,6 +423,9 @@ class Perceiver3DEncoder(nn.Module):
         absolute_time_encode = absolute_time_expansion(absolute_times, self.embed_dim)
         absolute_time_embed = self.absolute_time_embed(absolute_time_encode.to(dtype=dtype))
         x = x + absolute_time_embed.unsqueeze(1)  # (B, L, D) + (B, 1, D)
+
+        # Add high-frequency information embedding.
+        x = self.freq_embed(x)
 
         x = self.pos_drop(x)
         return x
