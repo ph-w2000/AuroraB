@@ -30,15 +30,35 @@ __all__ = ["Perceiver3DEncoder"]
 
 
 class HighFreqExtractor(nn.Module):
-    def __init__(self, dim):
+    def __init__(self, dim, cutoff=0.5):
         super().__init__()
         self.conv = nn.Conv1d(dim, dim, kernel_size=5, padding=2, groups=dim)
         self.act = nn.GELU()
         self.proj = nn.Linear(dim, 1)
+        self.cutoff = cutoff
 
     def forward(self, x):
-        x = x.transpose(1,2)
-        hf = self.conv(x)
+        B, L, D = x.shape
+
+        # 1. FFT along sequence
+        xf = torch.fft.rfft(x, dim=1, norm="ortho")
+
+        # 2. Create normalized frequency grid
+        freq = torch.linspace(0, 1, xf.size(1), device=x.device)
+        mask = (freq > self.cutoff).float()
+        mask = mask.view(1, -1, 1)
+
+        # 3. Keep high-frequency band
+        xf_high = xf * mask
+
+        # 4. Back to time domain
+        x_high = torch.fft.irfft(xf_high, n=L, dim=1, norm="ortho")
+
+        # # 5. Collapse feature dimension
+        # x_high = x_high.norm(dim=2)
+
+        x_high = x_high.transpose(1,2)
+        hf = self.conv(x_high)
         hf = self.act(hf)
         hf = hf.transpose(1,2)
         hf = self.proj(hf).squeeze(-1)
@@ -52,7 +72,7 @@ class FrequencyAwarePositionalEmbedding(nn.Module):
 
         self.embed_dim = embed_dim
 
-        self.freq_extractor = HighFreqExtractor(self.embed_dim)
+        self.freq_extractor = HighFreqExtractor(dim=embed_dim, cutoff=0.5)
 
         # Structured Fourier basis
         self.frequency_embed = nn.Linear(self.embed_dim, self.embed_dim)
