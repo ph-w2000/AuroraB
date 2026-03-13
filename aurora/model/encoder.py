@@ -6,7 +6,8 @@ from typing import Optional
 import numpy as np
 import torch
 from einops import rearrange
-from torch import nn
+from torch import nn, einsum
+import math
 
 from aurora.batch import Batch
 from aurora.model.fourier import (
@@ -26,39 +27,16 @@ from aurora.model.util import (
     init_weights,
 )
 
-__all__ = ["Perceiver3DEncoder"]
-
-
 class HighFreqExtractor(nn.Module):
-    def __init__(self, dim, cutoff=0.5):
+    def __init__(self, dim):
         super().__init__()
         self.conv = nn.Conv1d(dim, dim, kernel_size=5, padding=2, groups=dim)
         self.act = nn.GELU()
         self.proj = nn.Linear(dim, 1)
-        self.cutoff = cutoff
 
     def forward(self, x):
-        B, L, D = x.shape
-
-        # 1. FFT along sequence
-        xf = torch.fft.rfft(x, dim=1, norm="ortho")
-
-        # 2. Create normalized frequency grid
-        freq = torch.linspace(0, 1, xf.size(1), device=x.device)
-        mask = (freq > self.cutoff).float()
-        mask = mask.view(1, -1, 1)
-
-        # 3. Keep high-frequency band
-        xf_high = xf * mask
-
-        # 4. Back to time domain
-        x_high = torch.fft.irfft(xf_high, n=L, dim=1, norm="ortho")
-
-        # # 5. Collapse feature dimension
-        # x_high = x_high.norm(dim=2)
-
-        x_high = x_high.transpose(1,2)
-        hf = self.conv(x_high)
+        x = x.transpose(1,2)
+        hf = self.conv(x)
         hf = self.act(hf)
         hf = hf.transpose(1,2)
         hf = self.proj(hf).squeeze(-1)
@@ -72,7 +50,7 @@ class FrequencyAwarePositionalEmbedding(nn.Module):
 
         self.embed_dim = embed_dim
 
-        self.freq_extractor = HighFreqExtractor(dim=embed_dim, cutoff=0.5)
+        self.freq_extractor = HighFreqExtractor(self.embed_dim)
 
         # Structured Fourier basis
         self.frequency_embed = nn.Linear(self.embed_dim, self.embed_dim)
@@ -98,9 +76,8 @@ class FrequencyAwarePositionalEmbedding(nn.Module):
         # Content-aware frequency gate
         gate = torch.sigmoid(self.gate_proj(x.mean(dim=1)))
 
-
-        x = x + gate.unsqueeze(1) * freq_emb
-        return x
+        freq_emb = gate.unsqueeze(1) * freq_emb
+        return freq_emb
     
 
 class Perceiver3DEncoder(nn.Module):
@@ -271,7 +248,7 @@ class Perceiver3DEncoder(nn.Module):
         x = torch.einsum("blcd->bcld", x)  # (B, C, L, D)
         return x
 
-    def forward(self, batch: Batch, lead_time: timedelta) -> torch.Tensor:
+    def forward(self, batch: Batch, lead_time: timedelta, memory_snapshot: list) -> torch.Tensor:
         """Peform encoding.
 
         Args:
@@ -445,7 +422,15 @@ class Perceiver3DEncoder(nn.Module):
         x = x + absolute_time_embed.unsqueeze(1)  # (B, L, D) + (B, 1, D)
 
         # Add high-frequency information embedding.
-        x = self.freq_embed(x)
+        raw_memory = self.freq_embed(x)
+        if len(memory_snapshot) != 0:
+            memory = torch.stack(memory_snapshot, 1).mean(dim=1)  # [B, Lm, D]
+            D = x.shape[-1]
 
+            dots = einsum('b i d, b j d -> b i j', x, memory) / math.sqrt(D)
+            attn = torch.softmax(dots, dim=-1)
+            enhanced_memory = einsum('b i j, b j d -> b i d', attn, memory)     
+            x = x + enhanced_memory
+            
         x = self.pos_drop(x)
-        return x
+        return x, raw_memory.detach()

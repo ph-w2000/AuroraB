@@ -84,6 +84,7 @@ class Batch:
     surf_vars: dict[str, torch.Tensor]
     static_vars: dict[str, torch.Tensor]
     atmos_vars: dict[str, torch.Tensor]
+    memory_snapshot: List[torch.Tensor]
     metadata: Metadata
 
     @property
@@ -112,6 +113,7 @@ class Batch:
                 k: normalise_atmos_var(v, k, self.metadata.atmos_levels)
                 for k, v in self.atmos_vars.items()
             },
+            memory_snapshot=self.memory_snapshot,
             metadata=self.metadata,
         )
 
@@ -136,6 +138,7 @@ class Batch:
                 k: unnormalise_atmos_var(v, k, self.metadata.atmos_levels)
                 for k, v in self.atmos_vars.items()
             },
+            memory_snapshot=self.memory_snapshot,
             metadata=self.metadata,
         )
 
@@ -160,6 +163,7 @@ class Batch:
                     time=self.metadata.time,
                     rollout_step=self.metadata.rollout_step,
                 ),
+                memory_snapshot=self.memory_snapshot
             )
         else:
             raise ValueError(
@@ -179,6 +183,7 @@ class Batch:
                 time=self.metadata.time,
                 rollout_step=self.metadata.rollout_step,
             ),
+            memory_snapshot=self.memory_snapshot
         )
 
     def to(self, device: str | torch.device) -> "Batch":
@@ -219,6 +224,7 @@ class Batch:
                 time=self.metadata.time,
                 rollout_step=self.metadata.rollout_step,
             ),
+            memory_snapshot=self.memory_snapshot
         )
 
     def to_netcdf(self, path: str | Path) -> None:

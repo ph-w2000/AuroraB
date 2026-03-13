@@ -266,6 +266,7 @@ class Perceiver3DDecoder(nn.Module):
             {v: surf_preds[:, i] for i, v in enumerate(surf_vars)},
             batch.static_vars,
             {},
+            batch.memory_snapshot,
             Metadata(
                 lat=lat,
                 lon=lon,

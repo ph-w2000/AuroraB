@@ -262,7 +262,7 @@ class Aurora(torch.nn.Module):
 
         self.autocast = autocast
 
-    def forward(self, batch: Batch) -> Batch:
+    def forward(self, batch: Batch) -> tuple[Batch, torch.tensor]:
         """Forward pass.
 
         Args:
@@ -319,9 +319,10 @@ class Aurora(torch.nn.Module):
         transformed_batch = self._pre_encoder_hook(transformed_batch)
 
         # The encoder is always just run.
-        x = self.encoder(
+        x, new_memory = self.encoder(
             transformed_batch,
             lead_time=self.timestep,
+            memory_snapshot=batch.memory_snapshot,
         )
 
         if self.autocast:
@@ -389,7 +390,7 @@ class Aurora(torch.nn.Module):
 
         pred = pred.unnormalise(surf_stats=self.surf_stats)
 
-        return pred
+        return pred, new_memory
 
     def batch_transform_hook(self, batch: Batch) -> Batch:
         """Transform the batch right after receiving it and before normalisation.
