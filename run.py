@@ -46,7 +46,7 @@ def create_parser():
     parser.add_argument("--num_workers",    type=int,   default=8,              help="number of workers for data loader")
     
     # --------------- Optimizer ---------------
-    parser.add_argument("--lr",             type=float, default=2e-3,            help="learning rate")
+    parser.add_argument("--lr",             type=float, default=5e-4,            help="learning rate")
     parser.add_argument("--lr-beta1",       type=float, default=0.90,            help="learning rate beta 1")
     parser.add_argument("--lr-beta2",       type=float, default=0.95,            help="learning rate beta 2")
     parser.add_argument("--l2-norm",        type=float, default=3e-5,            help="l2 norm weight decay")
@@ -142,7 +142,7 @@ class Runner(object):
 
         set_seed(self.args.seed)
         self.model_name = 'Aurora_Small_Pretrained'
-        self.exp_name   = f"{self.model_name}_{self.args.dataset}_lora_fft_freq_embed"
+        self.exp_name   = f"{self.model_name}_{self.args.dataset}_lora_fft_memory_bank"
         
         cur_dir         = os.path.dirname(os.path.abspath(__file__))
         
@@ -471,6 +471,7 @@ class Runner(object):
             surf_vars={"vil": model_input},
             static_vars={},
             atmos_vars={},
+            memory_snapshot=[],
             metadata=Metadata(
                 lat=lat_grid,
                 lon=lon_grid,
@@ -479,13 +480,17 @@ class Runner(object):
             ),
         )
 
+        local_memory = []
         for i in range(self.args.frames_out):
             aurora_batch.surf_vars={"vil": model_input}
-            # aurora_batch.metadata.rollout_step = i
+            aurora_batch.metadata.rollout_step = i
             aurora_batch.metadata.time = tuple((t+pd.Timedelta(minutes=5 * i)).to_pydatetime() for t in input_metadata['time_utc'])
+            aurora_batch.memory_snapshot = local_memory
 
-            prediction = self.model(aurora_batch.to(self.device)).surf_vars['vil']
+            prediction, new_memory = self.model(aurora_batch.to(self.device))
+            prediction = prediction.surf_vars['vil']
             predictions.append(prediction.clamp(0,1))
+            local_memory.append(new_memory)
 
             model_input = torch.cat([model_input[:,-1:,], frames_out[:,i:i+1]], dim=1)
         
@@ -531,6 +536,7 @@ class Runner(object):
                 surf_vars={"vil": model_input},
                 static_vars={},
                 atmos_vars={},
+                memory_snapshot=[],
                 metadata=Metadata(
                     lat=lat_grid,
                     lon=lon_grid,
@@ -539,16 +545,19 @@ class Runner(object):
                 ),
             )
 
+            local_memory = []
             for i in range(self.args.frames_out):
                 aurora_batch.surf_vars={"vil": model_input}
-                # aurora_batch.metadata.rollout_step = i
+                aurora_batch.metadata.rollout_step = i
                 aurora_batch.metadata.time = tuple((t+pd.Timedelta(minutes=5 * i)).to_pydatetime() for t in input_metadata['time_utc'])
 
 
-                prediction = self.model(aurora_batch.to(self.device)).surf_vars['vil'].clamp(0,1)
+                prediction, new_memory = self.model(aurora_batch.to(self.device))
+                prediction = prediction.surf_vars['vil'].clamp(0,1)
                 predictions.append(prediction.to("cpu"))
 
                 model_input = torch.cat([model_input[:,-1:,], prediction], dim=1)
+                local_memory.append(new_memory)
 
             predictions = torch.cat(predictions, dim=1)
         
