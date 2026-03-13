@@ -421,7 +421,7 @@ class Perceiver3DEncoder(nn.Module):
         absolute_time_embed = self.absolute_time_embed(absolute_time_encode.to(dtype=dtype))
         x = x + absolute_time_embed.unsqueeze(1)  # (B, L, D) + (B, 1, D)
 
-        # Add high-frequency information embedding.
+        # Memory processing.
         raw_memory = self.freq_embed(x)
         if len(memory_snapshot) != 0:
             memory = torch.stack(memory_snapshot, 1).mean(dim=1)  # [B, Lm, D]
@@ -430,7 +430,8 @@ class Perceiver3DEncoder(nn.Module):
             dots = einsum('b i d, b j d -> b i j', x, memory) / math.sqrt(D)
             attn = torch.softmax(dots, dim=-1)
             enhanced_memory = einsum('b i j, b j d -> b i d', attn, memory)     
-            x = x + enhanced_memory
-            
+            raw_memory = raw_memory + enhanced_memory
+
+        x = x + raw_memory
         x = self.pos_drop(x)
         return x, raw_memory.detach()
