@@ -16,6 +16,8 @@ __all__ = [
     "levels_expansion",
     "absolute_time_expansion",
     "frequency_expansion",
+    "memory_spatial_expansion",
+    "memory_sequential_expansion"
 ]
 
 
@@ -129,3 +131,9 @@ absolute_time_expansion = FourierExpansion(1, 24 * 365.25, assert_range=False)
 
 frequency_expansion = FourierExpansion(0.01, 1.01)
 """:class:`.FourierExpansion`: Fourier expansion for the frequency expansion."""
+
+memory_spatial_expansion = FourierExpansion(1, 1024)
+""":class:`.FourierExpansion`: Fourier expansion for the memory spatial expansion."""
+
+memory_sequential_expansion = FourierExpansion(1, 20)
+""":class:`.FourierExpansion`: Fourier expansion for the memory sequential expansion."""

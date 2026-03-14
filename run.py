@@ -480,7 +480,7 @@ class Runner(object):
             ),
         )
 
-        local_memory = []
+        local_memory = None
         for i in range(self.args.frames_out):
             aurora_batch.surf_vars={"vil": model_input}
             aurora_batch.metadata.rollout_step = i
@@ -490,7 +490,11 @@ class Runner(object):
             prediction, new_memory = self.model(aurora_batch.to(self.device))
             prediction = prediction.surf_vars['vil']
             predictions.append(prediction.clamp(0,1))
-            local_memory.append(new_memory)
+            
+            if local_memory is None:
+                local_memory = new_memory.unsqueeze(1).detach()          # [B,1,L,D]
+            else:
+                local_memory = torch.cat([local_memory, new_memory.unsqueeze(1)], dim=1).detach()  # [B,T,L,D]
 
             model_input = torch.cat([model_input[:,-1:,], frames_out[:,i:i+1]], dim=1)
         
@@ -545,19 +549,22 @@ class Runner(object):
                 ),
             )
 
-            local_memory = []
+            local_memory = None
             for i in range(self.args.frames_out):
                 aurora_batch.surf_vars={"vil": model_input}
                 aurora_batch.metadata.rollout_step = i
                 aurora_batch.metadata.time = tuple((t+pd.Timedelta(minutes=5 * i)).to_pydatetime() for t in input_metadata['time_utc'])
-
+                aurora_batch.memory_snapshot = local_memory
 
                 prediction, new_memory = self.model(aurora_batch.to(self.device))
                 prediction = prediction.surf_vars['vil'].clamp(0,1)
                 predictions.append(prediction.to("cpu"))
 
                 model_input = torch.cat([model_input[:,-1:,], prediction], dim=1)
-                local_memory.append(new_memory)
+                if local_memory is None:
+                    local_memory = new_memory.unsqueeze(1)         # [B,1,L,D]
+                else:
+                    local_memory = torch.cat([local_memory, new_memory.unsqueeze(1)], dim=1)  # [B,T,L,D]
 
             predictions = torch.cat(predictions, dim=1)
         

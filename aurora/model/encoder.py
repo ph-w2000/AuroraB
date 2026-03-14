@@ -16,7 +16,9 @@ from aurora.model.fourier import (
     levels_expansion,
     pos_expansion,
     scale_expansion,
-    frequency_expansion
+    frequency_expansion,
+    memory_spatial_expansion,
+    memory_sequential_expansion
 )
 from aurora.model.levelcond import LevelConditioned
 from aurora.model.patchembed import LevelPatchEmbed
@@ -28,15 +30,35 @@ from aurora.model.util import (
 )
 
 class HighFreqExtractor(nn.Module):
-    def __init__(self, dim):
+    def __init__(self, dim, cutoff=0.5):
         super().__init__()
         self.conv = nn.Conv1d(dim, dim, kernel_size=5, padding=2, groups=dim)
         self.act = nn.GELU()
         self.proj = nn.Linear(dim, 1)
+        self.cutoff = cutoff
 
     def forward(self, x):
-        x = x.transpose(1,2)
-        hf = self.conv(x)
+        B, L, D = x.shape
+
+        # 1. FFT along sequence
+        xf = torch.fft.rfft(x, dim=1, norm="ortho")
+
+        # 2. Create normalized frequency grid
+        freq = torch.linspace(0, 1, xf.size(1), device=x.device)
+        mask = (freq > self.cutoff).float()
+        mask = mask.view(1, -1, 1)
+
+        # 3. Keep high-frequency band
+        xf_high = xf * mask
+
+        # 4. Back to time domain
+        x_high = torch.fft.irfft(xf_high, n=L, dim=1, norm="ortho")
+
+        # # 5. Collapse feature dimension
+        # x_high = x_high.norm(dim=2)
+
+        x_high = x_high.transpose(1,2)
+        hf = self.conv(x_high)
         hf = self.act(hf)
         hf = hf.transpose(1,2)
         hf = self.proj(hf).squeeze(-1)
@@ -50,7 +72,7 @@ class FrequencyAwarePositionalEmbedding(nn.Module):
 
         self.embed_dim = embed_dim
 
-        self.freq_extractor = HighFreqExtractor(self.embed_dim)
+        self.freq_extractor = HighFreqExtractor(dim=embed_dim, cutoff=0.5)
 
         # Structured Fourier basis
         self.frequency_embed = nn.Linear(self.embed_dim, self.embed_dim)
@@ -183,6 +205,8 @@ class Perceiver3DEncoder(nn.Module):
         self.absolute_time_embed = nn.Linear(embed_dim, embed_dim)
         self.atmos_levels_embed = nn.Linear(embed_dim, embed_dim)
         self.freq_embed = FrequencyAwarePositionalEmbedding(embed_dim=embed_dim)
+        self.memory_spatial_embed = nn.Linear(embed_dim, embed_dim)
+        self.memory_sequential_embed = nn.Linear(embed_dim, embed_dim)
 
         # Patch embeddings:
         assert max_history_size > 0, "At least one history step is required."
@@ -423,15 +447,32 @@ class Perceiver3DEncoder(nn.Module):
 
         # Memory processing.
         raw_memory = self.freq_embed(x)
-        if len(memory_snapshot) != 0:
-            memory = torch.stack(memory_snapshot, 1).mean(dim=1)  # [B, Lm, D]
-            D = x.shape[-1]
+        if memory_snapshot != None:
+            memory = memory_snapshot  # [B, T, L, D]
+        else:
+            memory = raw_memory.unsqueeze(1)  # [B, 1, L, D]
 
-            dots = einsum('b i d, b j d -> b i j', x, memory) / math.sqrt(D)
-            attn = torch.softmax(dots, dim=-1)
-            enhanced_memory = einsum('b i j, b j d -> b i d', attn, memory)     
-            raw_memory = raw_memory + enhanced_memory
+        Bm, Tm, Lm, Dm = memory.shape
+        memory_spatial_indexes = torch.arange(
+            1, Lm + 1, device=x.device, dtype=dtype
+        ).view(1, Lm).expand(Bm, Lm)
+        memory_spatial_encode = memory_spatial_expansion(memory_spatial_indexes, self.embed_dim).to(dtype=dtype)
+        memory_spatial_emb = self.memory_spatial_embed(memory_spatial_encode).unsqueeze(1)  # (B, 1, L, D)
+        memory = memory + memory_spatial_emb
 
-        x = x + raw_memory
+        memory_sequential_indexes = torch.arange(
+            1, Tm + 1, device=x.device, dtype=dtype
+        ).view(1, Tm).expand(Bm, Tm)
+        memory_sequential_encode = memory_sequential_expansion(memory_sequential_indexes, self.embed_dim).to(dtype=dtype)
+        memory_sequential_emb = self.memory_sequential_embed(memory_sequential_encode).unsqueeze(2)  # (B, T, 1, D)
+        memory = memory + memory_sequential_emb
+
+        memory = memory.reshape(Bm, -1, Dm)
+
+        dots = einsum('b i d, b j d -> b i j', x+raw_memory, memory) / math.sqrt(Dm)
+        attn = torch.softmax(dots, dim=-1)
+        enhanced_memory = einsum('b i j, b j d -> b i d', attn, memory)
+        
+        x = x + enhanced_memory
         x = self.pos_drop(x)
-        return x, raw_memory.detach()
+        return x, enhanced_memory.detach()

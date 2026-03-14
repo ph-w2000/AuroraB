@@ -84,7 +84,7 @@ class Batch:
     surf_vars: dict[str, torch.Tensor]
     static_vars: dict[str, torch.Tensor]
     atmos_vars: dict[str, torch.Tensor]
-    memory_snapshot: List[torch.Tensor]
+    memory_snapshot: torch.Tensor
     metadata: Metadata
 
     @property
