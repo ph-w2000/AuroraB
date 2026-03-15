@@ -29,6 +29,116 @@ from aurora.model.util import (
     init_weights,
 )
 
+class DriftAwareLightMemory(nn.Module):
+    def __init__(self, embed_dim):
+        super().__init__()
+        self.embed_dim = embed_dim
+
+        self.freq_embed = nn.Linear(embed_dim, embed_dim)
+
+        # self.memory_spatial_embed = nn.Linear(embed_dim, embed_dim)
+        self.memory_sequential_embed = nn.Linear(embed_dim, embed_dim)
+
+        # lightweight temporal retrieval
+        self.query_proj = nn.Linear(embed_dim, embed_dim)
+        self.memory_proj = nn.Linear(embed_dim, embed_dim)
+
+        # drift-aware temporal score
+        self.cur_drift_proj = nn.Linear(embed_dim, embed_dim)
+        self.mem_drift_proj = nn.Linear(embed_dim, embed_dim)
+
+        # fusion gate
+        self.fuse_gate = nn.Linear(embed_dim * 2, embed_dim)
+
+        # weights
+        self.lambda_drift = 0.3
+
+    def forward(
+        self,
+        x,                      # [B, L, D]
+        memory_snapshot,        # [B, T, L, D] or None
+        memory_sequential_expansion,
+        dtype=None,
+    ):
+        """
+        x: current hidden state [B, L, D]
+        memory_snapshot: historical drift-correction memory [B, T, L, D]
+        """
+        if dtype is None:
+            dtype = x.dtype
+
+        # current raw memory / drift-correction feature
+        raw_memory = self.freq_embed(x)  # [B, L, D]
+
+        if memory_snapshot is not None:
+            memory = memory_snapshot      # [B, T, L, D]
+        else:
+            memory = raw_memory.unsqueeze(1)  # [B, 1, L, D]
+
+        Bm, Tm, Lm, Dm = memory.shape
+
+        # --------------------------------------------------
+        # 2) add sequential / rollout embedding
+        # --------------------------------------------------
+        memory_sequential_indexes = torch.arange(
+            1, Tm + 1, device=x.device, dtype=dtype
+        ).view(1, Tm).expand(Bm, Tm)
+
+        memory_sequential_encode = memory_sequential_expansion(
+            memory_sequential_indexes, self.embed_dim
+        ).to(dtype=dtype)  # [B, T, D]
+
+        memory_sequential_emb = self.memory_sequential_embed(
+            memory_sequential_encode
+        ).unsqueeze(2)  # [B, T, 1, D]
+
+        memory = memory + memory_sequential_emb
+
+        # ==================================================
+        # 3) LIGHTWEIGHT TEMPORAL RETRIEVAL
+        #    no flatten, no [B, L, T*L] attention map
+        # ==================================================
+
+        # current query summary: [B, D]
+        q_global = (x + raw_memory).mean(dim=1)
+        q_global = self.query_proj(q_global)
+
+        # rollout summaries: [B, T, D]
+        memory_global = memory.mean(dim=2)
+        memory_global = self.memory_proj(memory_global)
+
+        # ----- content score over rollout dimension only -----
+        # [B, T]
+        content_score = torch.einsum(
+            'bd,btd->bt', q_global, memory_global
+        ) / math.sqrt(Dm)
+
+        # ----- drift consistency score -----
+        cur_drift = self.cur_drift_proj(raw_memory.mean(dim=1))     # [B, D]
+        mem_drift = self.mem_drift_proj(memory.mean(dim=2))         # [B, T, D]
+
+        drift_score = -((cur_drift.unsqueeze(1) - mem_drift) ** 2).mean(dim=-1)  # [B, T]
+
+        # total temporal score
+        time_score = content_score + self.lambda_drift * drift_score
+        time_attn = torch.softmax(time_score, dim=1)  # [B, T]
+
+        # ==================================================
+        # 4) aggregate memory along rollout dimension
+        # ==================================================
+        # [B, L, D]
+        enhanced_memory = torch.einsum('bt,btld->bld', time_attn, memory)
+
+        # ==================================================
+        # 5) gated fusion
+        # ==================================================
+        fuse_input = torch.cat([x, enhanced_memory], dim=-1)     # [B, L, 2D]
+        gate = torch.sigmoid(self.fuse_gate(fuse_input))         # [B, L, D]
+
+        x = x + gate * enhanced_memory
+
+        return x, raw_memory
+
 class HighFreqExtractor(nn.Module):
     def __init__(self, dim, cutoff=0.5):
         super().__init__()
@@ -204,9 +314,7 @@ class Perceiver3DEncoder(nn.Module):
         self.lead_time_embed = nn.Linear(embed_dim, embed_dim)
         self.absolute_time_embed = nn.Linear(embed_dim, embed_dim)
         self.atmos_levels_embed = nn.Linear(embed_dim, embed_dim)
-        self.freq_embed = FrequencyAwarePositionalEmbedding(embed_dim=embed_dim)
-        self.memory_spatial_embed = nn.Linear(embed_dim, embed_dim)
-        self.memory_sequential_embed = nn.Linear(embed_dim, embed_dim)
+        self.drift_aware_memory_process = DriftAwareLightMemory(embed_dim)
 
         # Patch embeddings:
         assert max_history_size > 0, "At least one history step is required."
@@ -446,33 +554,7 @@ class Perceiver3DEncoder(nn.Module):
         x = x + absolute_time_embed.unsqueeze(1)  # (B, L, D) + (B, 1, D)
 
         # Memory processing.
-        raw_memory = self.freq_embed(x)
-        if memory_snapshot != None:
-            memory = memory_snapshot  # [B, T, L, D]
-        else:
-            memory = raw_memory.unsqueeze(1)  # [B, 1, L, D]
-
-        Bm, Tm, Lm, Dm = memory.shape
-        memory_spatial_indexes = torch.arange(
-            1, Lm + 1, device=x.device, dtype=dtype
-        ).view(1, Lm).expand(Bm, Lm)
-        memory_spatial_encode = memory_spatial_expansion(memory_spatial_indexes, self.embed_dim).to(dtype=dtype)
-        memory_spatial_emb = self.memory_spatial_embed(memory_spatial_encode).unsqueeze(1)  # (B, 1, L, D)
-        memory = memory + memory_spatial_emb
-
-        memory_sequential_indexes = torch.arange(
-            1, Tm + 1, device=x.device, dtype=dtype
-        ).view(1, Tm).expand(Bm, Tm)
-        memory_sequential_encode = memory_sequential_expansion(memory_sequential_indexes, self.embed_dim).to(dtype=dtype)
-        memory_sequential_emb = self.memory_sequential_embed(memory_sequential_encode).unsqueeze(2)  # (B, T, 1, D)
-        memory = memory + memory_sequential_emb
-
-        memory = memory.reshape(Bm, -1, Dm)
-
-        dots = einsum('b i d, b j d -> b i j', x+raw_memory, memory) / math.sqrt(Dm)
-        attn = torch.softmax(dots, dim=-1)
-        enhanced_memory = einsum('b i j, b j d -> b i d', attn, memory)
+        x, enhanced_memory = self.drift_aware_memory_process(x, memory_snapshot, memory_sequential_expansion)
         
-        x = x + enhanced_memory
         x = self.pos_drop(x)
         return x, enhanced_memory.detach()
