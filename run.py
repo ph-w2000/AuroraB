@@ -425,7 +425,7 @@ class Runner(object):
                 pbar.update(1)
 
             # save checkpoint and do test every epoch
-            if epoch > 10:
+            if epoch > 5:
                 self.save()
             print_log(f" ========= Finisth one Epoch ==========", self.is_main)
 

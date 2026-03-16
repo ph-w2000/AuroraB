@@ -34,7 +34,7 @@ class DriftAwareLightMemory(nn.Module):
         super().__init__()
         self.embed_dim = embed_dim
 
-        self.freq_embed = nn.Linear(embed_dim, embed_dim)
+        self.drift_extractor = DriftCorrectionExtractor(embed_dim)
 
         # self.memory_spatial_embed = nn.Linear(embed_dim, embed_dim)
         self.memory_sequential_embed = nn.Linear(embed_dim, embed_dim)
@@ -53,6 +53,13 @@ class DriftAwareLightMemory(nn.Module):
         # weights
         self.lambda_drift = 0.3
 
+    def build_physical_trajectory(self, x, memory_snapshot):
+        if memory_snapshot is None:
+            return x
+        
+        prev_state = memory_snapshot[:, -1]  # [B, L, D]
+        return prev_state
+
     def forward(
         self,
         x,                      # [B, L, D]
@@ -67,8 +74,13 @@ class DriftAwareLightMemory(nn.Module):
         if dtype is None:
             dtype = x.dtype
 
+
+        x_phys = self.build_physical_trajectory(
+            x, memory_snapshot
+        )  # [B, L, D]
+
         # current raw memory / drift-correction feature
-        raw_memory = self.freq_embed(x)  # [B, L, D]
+        raw_memory, drift_residual = self.drift_extractor(x, x_phys)  # [B, L, D], [B, L, D]
 
         if memory_snapshot is not None:
             memory = memory_snapshot      # [B, T, L, D]
@@ -96,7 +108,6 @@ class DriftAwareLightMemory(nn.Module):
 
         # ==================================================
         # 3) LIGHTWEIGHT TEMPORAL RETRIEVAL
-        #    no flatten, no [B, L, T*L] attention map
         # ==================================================
 
         # current query summary: [B, D]
@@ -114,8 +125,15 @@ class DriftAwareLightMemory(nn.Module):
         ) / math.sqrt(Dm)
 
         # ----- drift consistency score -----
-        cur_drift = self.cur_drift_proj(raw_memory.mean(dim=1))     # [B, D]
-        mem_drift = self.mem_drift_proj(memory.mean(dim=2))         # [B, T, D]
+        cur_drift = self.cur_drift_proj(drift_residual.mean(dim=1))     # [B, D]
+
+        if Tm > 1:
+            mem_delta = torch.zeros_like(memory)
+            mem_delta[:, 1:] = memory[:, 1:] - memory[:, :-1]
+            mem_delta[:, 0] = memory[:, 0]
+        else:
+            mem_delta = memory
+        mem_drift = self.mem_drift_proj(mem_delta.mean(dim=2))         # [B, T, D]
 
         drift_score = -((cur_drift.unsqueeze(1) - mem_drift) ** 2).mean(dim=-1)  # [B, T]
 
@@ -135,9 +153,69 @@ class DriftAwareLightMemory(nn.Module):
         fuse_input = torch.cat([x, enhanced_memory], dim=-1)     # [B, L, 2D]
         gate = torch.sigmoid(self.fuse_gate(fuse_input))         # [B, L, D]
 
-        x = x + gate * enhanced_memory
+        x = x + raw_memory + gate * enhanced_memory
+        
+        aux = {
+            "x_phys": x_phys,
+            "drift_residual": drift_residual,
+            "content_score": content_score,
+            "drift_score": drift_score,
+            "time_attn": time_attn,
+        }
 
-        return x, raw_memory
+        return x, x.detach(), aux
+
+class DriftCorrectionExtractor(nn.Module):
+    """
+    Explicit drift-correction feature extractor.
+
+    Drift is defined as the departure from a physically plausible trajectory:
+        delta = x - x_phys
+
+    The extractor encodes this departure into a correction feature.
+    """
+
+    def __init__(self, embed_dim):
+        super().__init__()
+        self.embed_dim = embed_dim
+
+        # encode drift residual itself
+        self.delta_proj = FrequencyAwareEmbedding(embed_dim)
+
+        # optional context branches
+        self.x_proj = nn.Linear(embed_dim, embed_dim)
+        self.phys_proj = nn.Linear(embed_dim, embed_dim)
+
+        # confidence / injection gate
+        self.gate_proj = nn.Linear(embed_dim * 3, embed_dim)
+
+        # final fusion
+        self.out_proj = nn.Linear(embed_dim, embed_dim)
+
+    def forward(self, x, x_phys):
+        """
+        x      : [B, L, D] current latent field
+        x_phys : [B, L, D] physically plausible continuation
+
+        returns
+        -------
+        drift_feat  : [B, L, D]
+        delta       : [B, L, D] explicit drift residual
+        """
+        delta = x - x_phys                           # explicit physical departure
+
+        delta_feat = self.delta_proj(delta)
+        x_feat = self.x_proj(x)
+        phys_feat = self.phys_proj(x_phys)
+
+        gate_input = torch.cat([delta, x, x_phys], dim=-1)
+        gate = torch.sigmoid(self.gate_proj(gate_input))
+
+        drift_feat = gate * delta_feat + (1.0 - gate) * (x_feat - phys_feat)
+        drift_feat = self.out_proj(drift_feat)
+
+        return drift_feat, delta
+    
 
 class HighFreqExtractor(nn.Module):
     def __init__(self, dim, cutoff=0.5):
@@ -176,7 +254,7 @@ class HighFreqExtractor(nn.Module):
         hf = 0.01 + hf
         return hf
     
-class FrequencyAwarePositionalEmbedding(nn.Module):
+class FrequencyAwareEmbedding(nn.Module):
     def __init__(self, embed_dim):
         super().__init__()
 
@@ -554,7 +632,7 @@ class Perceiver3DEncoder(nn.Module):
         x = x + absolute_time_embed.unsqueeze(1)  # (B, L, D) + (B, 1, D)
 
         # Memory processing.
-        x, enhanced_memory = self.drift_aware_memory_process(x, memory_snapshot, memory_sequential_expansion)
+        x, enhanced_x_memory, aux = self.drift_aware_memory_process(x, memory_snapshot, memory_sequential_expansion)
         
         x = self.pos_drop(x)
-        return x, enhanced_memory.detach()
+        return x, enhanced_x_memory.detach()
