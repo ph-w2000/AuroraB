@@ -28,6 +28,7 @@ from utils.tools import print_log, cycle, show_img_info
 from aurora import AuroraSmallPretrained, AuroraPretrained, Batch, Metadata, rollout
 from aurora.normalisation import locations, scales
 from datetime import datetime, timedelta
+import lpips
 os.environ["ACCELERATE_DEBUG_MODE"] = "1"
 
 def create_parser():
@@ -109,10 +110,11 @@ class Runner(object):
         
         # distributed ema for parallel sampling
 
-        self.model, self.optimizer,  self.scheduler, self.train_loader, self.valid_loader, self.test_loader = self.accelerator.prepare(
+        self.model, self.optimizer,  self.scheduler, self.train_loader, self.valid_loader, self.test_loader, self.lpips_model = self.accelerator.prepare(
             self.model, 
             self.optimizer, self.scheduler,
-            self.train_loader, self.valid_loader, self.test_loader
+            self.train_loader, self.valid_loader, self.test_loader, 
+            self.lpips_model
         )
         
         self.train_dl_cycle = cycle(self.train_loader)
@@ -247,6 +249,9 @@ class Runner(object):
         #     if param.requires_grad:
         #         print(name)
 
+        self.lpips_model = lpips.LPIPS(net='alex', verbose=False)
+        for p in self.lpips_model.parameters():
+            p.requires_grad = False
                                 
         self.model = model.to(self.device)
         self.ema = EMA(self.model, beta=self.args.ema_rate, update_every=20).to(self.device)        
@@ -381,8 +386,8 @@ class Runner(object):
                 # train the model with mixed_precision
                 with self.accelerator.autocast(self.model):
 
-                    loss = self._train_batch(batch)
-                    self.accelerator.backward(loss)
+                    loss_dict = self._train_batch(batch)
+                    self.accelerator.backward(loss_dict['total_loss'])
                     
                     # if self.cur_step == 0:
                     #     # training process check
@@ -404,7 +409,9 @@ class Runner(object):
                 lr = self.optimizer.param_groups[0]['lr']
                 log_dict = dict()
                 log_dict['lr'] = lr
-                log_dict['loss'] = loss.detach().item()
+                log_dict['total_loss'] = loss_dict['total_loss'].detach().item()
+                log_dict['l1_loss'] = loss_dict['l1_loss'].detach().item()
+                log_dict['lpips_loss'] = loss_dict['lpips_loss'].detach().item()
                 self.accelerator.log(log_dict, step=self.cur_step)
                 pbar.set_postfix(**log_dict)   
                 state_str = f"Epoch {self.cur_epoch}/{self.global_epochs}, Step {i}/{self.steps_per_epoch}"
@@ -416,7 +423,9 @@ class Runner(object):
                 self.ema.update()
 
                 if self.accelerator.is_main_process:
-                    wandb.log({'loss':(loss.detach().item()),
+                    wandb.log({'total_loss':(loss_dict['total_loss'].detach().item()),
+                                'l1_loss': loss_dict['l1_loss'].detach().item(),
+                                'lpips_loss': loss_dict['lpips_loss'].detach().item(),
                                 'lr':lr, 
                             'epoch':epoch,
                             'steps':self.cur_step}) 
@@ -501,7 +510,18 @@ class Runner(object):
         predictions = torch.cat(predictions, dim=1)
         loss = F.l1_loss(predictions, frames_out, reduction = 'mean')
 
-        return loss
+        loss_lpips = []
+        for i in range(self.args.frames_out):
+            loss_lpips.append(self.lpips_model(predictions[:,i:i+1], frames_out[:,i:i+1]).mean())
+        loss_lpips = torch.stack(loss_lpips).mean()
+
+        dict_loss = {
+            'l1_loss': loss,
+            'lpips_loss': loss_lpips,
+            'total_loss': loss + 0.5 * loss_lpips,
+        }
+
+        return dict_loss
         
     
     @torch.no_grad()

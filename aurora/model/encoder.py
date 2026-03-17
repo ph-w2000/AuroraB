@@ -180,7 +180,7 @@ class DriftCorrectionExtractor(nn.Module):
         self.embed_dim = embed_dim
 
         # encode drift residual itself
-        self.delta_proj = FrequencyAwareEmbedding(embed_dim)
+        self.delta_proj = nn.Linear(embed_dim, embed_dim)
 
         # optional context branches
         self.x_proj = nn.Linear(embed_dim, embed_dim)
@@ -215,79 +215,6 @@ class DriftCorrectionExtractor(nn.Module):
         drift_feat = self.out_proj(drift_feat)
 
         return drift_feat, delta
-    
-
-class HighFreqExtractor(nn.Module):
-    def __init__(self, dim, cutoff=0.5):
-        super().__init__()
-        self.conv = nn.Conv1d(dim, dim, kernel_size=5, padding=2, groups=dim)
-        self.act = nn.GELU()
-        self.proj = nn.Linear(dim, 1)
-        self.cutoff = cutoff
-
-    def forward(self, x):
-        B, L, D = x.shape
-
-        # 1. FFT along sequence
-        xf = torch.fft.rfft(x, dim=1, norm="ortho")
-
-        # 2. Create normalized frequency grid
-        freq = torch.linspace(0, 1, xf.size(1), device=x.device)
-        mask = (freq > self.cutoff).float()
-        mask = mask.view(1, -1, 1)
-
-        # 3. Keep high-frequency band
-        xf_high = xf * mask
-
-        # 4. Back to time domain
-        x_high = torch.fft.irfft(xf_high, n=L, dim=1, norm="ortho")
-
-        # # 5. Collapse feature dimension
-        # x_high = x_high.norm(dim=2)
-
-        x_high = x_high.transpose(1,2)
-        hf = self.conv(x_high)
-        hf = self.act(hf)
-        hf = hf.transpose(1,2)
-        hf = self.proj(hf).squeeze(-1)
-        hf = torch.sigmoid(hf)
-        hf = 0.01 + hf
-        return hf
-    
-class FrequencyAwareEmbedding(nn.Module):
-    def __init__(self, embed_dim):
-        super().__init__()
-
-        self.embed_dim = embed_dim
-
-        self.freq_extractor = HighFreqExtractor(dim=embed_dim, cutoff=0.5)
-
-        # Structured Fourier basis
-        self.frequency_embed = nn.Linear(self.embed_dim, self.embed_dim)
-
-        # Spectral scaling (learnable)
-        self.freq_scale = nn.Parameter(torch.ones(embed_dim))
-
-        # Content-aware gating
-        self.gate_proj = nn.Linear(embed_dim, embed_dim)
-
-    def forward(self, x):
-        """
-        x: (B, L, D)
-        """
-
-        high_freq_info = self.freq_extractor(x)  # (B, L)
-
-        # Generate frequency embeddings using the pre-defined frequency expansion
-        freq_emb = self.frequency_embed(frequency_expansion(high_freq_info, self.embed_dim))
-
-        freq_emb = freq_emb * self.freq_scale[None, None, :]  # (B, L, D) * (D,) -> (B, L, D)
-
-        # Content-aware frequency gate
-        gate = torch.sigmoid(self.gate_proj(x.mean(dim=1)))
-
-        freq_emb = gate.unsqueeze(1) * freq_emb
-        return freq_emb
     
 
 class Perceiver3DEncoder(nn.Module):
