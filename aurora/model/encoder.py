@@ -16,8 +16,6 @@ from aurora.model.fourier import (
     levels_expansion,
     pos_expansion,
     scale_expansion,
-    frequency_expansion,
-    memory_spatial_expansion,
     memory_sequential_expansion
 )
 from aurora.model.levelcond import LevelConditioned
