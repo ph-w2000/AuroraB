@@ -480,7 +480,7 @@ class Runner(object):
             surf_vars={"vil": model_input},
             static_vars={},
             atmos_vars={},
-            memory_snapshot=[],
+            memory_snapshot=None,
             metadata=Metadata(
                 lat=lat_grid,
                 lon=lon_grid,
@@ -560,7 +560,7 @@ class Runner(object):
                 surf_vars={"vil": model_input},
                 static_vars={},
                 atmos_vars={},
-                memory_snapshot=[],
+                memory_snapshot=None,
                 metadata=Metadata(
                     lat=lat_grid,
                     lon=lon_grid,
