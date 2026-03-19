@@ -144,7 +144,7 @@ class Runner(object):
 
         set_seed(self.args.seed)
         self.model_name = 'Aurora_Small_Pretrained'
-        self.exp_name   = f"{self.model_name}_{self.args.dataset}_lora_memory_bank"
+        self.exp_name   = f"{self.model_name}_{self.args.dataset}_lora_freq_memory_bank"
         
         cur_dir         = os.path.dirname(os.path.abspath(__file__))
         
