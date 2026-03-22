@@ -143,7 +143,7 @@ class Runner(object):
         # =================================
 
         set_seed(self.args.seed)
-        self.model_name = 'Aurora_Small_Pretrained'
+        self.model_name = 'Aurora_Pretrained'
         self.exp_name   = f"{self.model_name}_{self.args.dataset}_lora_memory_bank"
         
         cur_dir         = os.path.dirname(os.path.abspath(__file__))
@@ -220,7 +220,7 @@ class Runner(object):
         # import and create different models given model config
         # =================================
 
-        model = AuroraSmallPretrained(
+        model = AuroraPretrained(
             surf_vars=("vil",),
             static_vars=None,
             atmos_vars=None,
