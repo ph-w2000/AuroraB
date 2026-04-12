@@ -98,14 +98,14 @@ class DriftAwareLightMemory(nn.Module):
             memory_sequential_indexes, self.embed_dim
         ).to(dtype=dtype)  # [B, T, D]
 
-        memory_sequential_emb = self.memory_sequential_embed(
+        memory_sequential_pos_emb = self.memory_sequential_embed(
             memory_sequential_encode
         ).unsqueeze(2)  # [B, T, 1, D]
 
-        memory = memory + memory_sequential_emb
+        memory = memory + memory_sequential_pos_emb
 
         # ==================================================
-        # 3) LIGHTWEIGHT TEMPORAL RETRIEVAL
+        # 3) LIGHTWEIGHT Enhancement
         # ==================================================
 
         # current query summary: [B, D]
@@ -135,7 +135,7 @@ class DriftAwareLightMemory(nn.Module):
 
         drift_score = -((cur_drift.unsqueeze(1) - mem_drift) ** 2).mean(dim=-1)  # [B, T]
 
-        # total temporal score
+        # total sequential score
         time_score = content_score + self.lambda_drift * drift_score
         time_attn = torch.softmax(time_score, dim=1)  # [B, T]
 
