@@ -12,6 +12,35 @@ plt.switch_backend('agg')
 np.seterr(divide='ignore', invalid='ignore')
 
 
+def mean_iou_over_thresholds(gt, pred, thresholds):
+    """
+    pred, gt: [T, 1, H, W] tensors
+    thresholds: list of thresholds
+    Returns: mean IoU across thresholds and timesteps
+    """
+    if isinstance(pred, torch.Tensor):
+        pred = pred.detach().cpu().numpy()
+        gt   = gt.detach().cpu().numpy()
+
+    ious = []
+    for th in thresholds:
+        # binarize
+        pred_mask = (pred * 255 >= th)
+        gt_mask   = (gt * 255 >= th)
+
+        # intersection & union
+        intersection = np.logical_and(pred_mask, gt_mask).sum()
+        union        = np.logical_or(pred_mask, gt_mask).sum()
+
+        # avoid div by zero
+        iou = intersection / union if union > 0 else 0.0
+        ious.append(iou)
+
+    # mean across thresholds
+    mean_iou = np.mean(ious)
+    return mean_iou
+
+
 def print_log(message, is_main_process=True):
     if is_main_process:
         print(message)

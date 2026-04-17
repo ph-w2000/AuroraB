@@ -23,7 +23,7 @@ from diffusers import (
 )
 
 from datasets.get_datasets import get_dataset
-from utils.metrics import Evaluator
+from utils.metrics import Evaluator, mean_iou_over_thresholds
 from utils.tools import print_log, cycle, show_img_info
 from aurora import AuroraSmallPretrained, AuroraPretrained, Batch, Metadata, rollout
 from aurora.normalisation import locations, scales
@@ -59,7 +59,7 @@ def create_parser():
     
     # --------------- Training ---------------
     parser.add_argument("--stride",         type=int,   default=13,               help="stride")
-    parser.add_argument("--batch_size",     type=int,   default=16,              help="batch size")
+    parser.add_argument("--batch_size",     type=int,   default=8,              help="batch size")
 
     parser.add_argument("--epochs",         type=int,   default=40,               help="number of epochs")
     parser.add_argument("--training_steps", type=int,   default=200000,          help="number of training steps")
@@ -144,7 +144,7 @@ class Runner(object):
 
         set_seed(self.args.seed)
         self.model_name = 'Aurora_Pretrained'
-        self.exp_name   = f"{self.model_name}_{self.args.dataset}_lora_memory_bank"
+        self.exp_name   = f"{self.model_name}_{self.args.dataset}_lora_PIMB"
         
         cur_dir         = os.path.dirname(os.path.abspath(__file__))
         
@@ -619,10 +619,11 @@ class Runner(object):
             # evaluate result and save
             eval.evaluate(radar_ori, radar_recon)
 
-            if cnt <= 5:
+            if cnt >=0:
                 if self.is_main:
                     for i in range(radar_ori.shape[0]):
-                        self.visiual_save_fn(radar_input[i], radar_recon[i], radar_ori[i], osp.join(save_dir, f"{cnt}-{i}"),data_type='vil')
+                        iou = round(mean_iou_over_thresholds(radar_ori[i], radar_recon[i], self.thresholds),4)
+                        self.visiual_save_fn(radar_input[i], radar_recon[i], radar_ori[i], osp.join(save_dir, f"{cnt}-{i}-{iou}"),data_type='vil')
 
             self.accelerator.wait_for_everyone()
             cnt += 1
