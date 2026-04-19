@@ -97,7 +97,7 @@ class Meteo(Dataset):
             metadata_dict = {
                 "time_utc": datetime.strptime(date[0].decode("utf-8"), "%Y-%m-%d %H:%M:%S") 
             }
-        return frames.unsqueeze(1), metadata_dict # (25,1,128,128)
+        return frames, metadata_dict # (25,1,128,128)
  
     
 # def gray2color(img):
