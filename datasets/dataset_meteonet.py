@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import torch
 import h5py
 import numpy as np
@@ -89,8 +91,13 @@ class Meteo(Dataset):
 
             frames = torch.from_numpy(imgs).float().squeeze() 
             frames = frames / self.pixel_scale
-            frames = self.transform(frames)     
-        return frames.unsqueeze(1) # (25,1,128,128)
+            frames = self.transform(frames)   
+
+            date = f[self.type][str(index)+"_dates"][()]
+            metadata_dict = {
+                "time_utc": datetime.strptime(date[0].decode("utf-8"), "%Y-%m-%d %H:%M:%S") 
+            }
+        return frames.unsqueeze(1), metadata_dict # (25,1,128,128)
  
     
 # def gray2color(img):

@@ -193,16 +193,28 @@ class Runner(object):
         self.thresholds      = THRESHOLDS
         self.scale_value     = PIXEL_SCALE
         
-        if self.args.dataset != 'sevir':
+        def meteo_collate_fn(batch: list[tuple[torch.Tensor, dict[str, Any]]]):
+            frames_list, metadata_list = zip(*batch)
+            # Stack frames into [B, T, 1, H, W]
+            frames = torch.stack(frames_list, dim=0)
+            # Keep time_utc as a list of per-sample sequences
+            metadata = {
+                "time_utc": [m["time_utc"] for m in metadata_list]
+            }
+            return frames, metadata
+        
+        if self.args.dataset == 'meteo':
             # preload big batch data for gradient accumulation
             self.train_loader = torch.utils.data.DataLoader(
-                train_data, batch_size=self.args.batch_size*self.args.grad_acc_step, shuffle=True, num_workers=self.args.num_workers, drop_last=True
+                train_data, batch_size=self.args.batch_size*self.args.grad_acc_step, shuffle=True, num_workers=self.args.num_workers, drop_last=True,
+                collate_fn=meteo_collate_fn
             )
             self.valid_loader = torch.utils.data.DataLoader(
-                valid_data, batch_size=self.args.batch_size, shuffle=False, num_workers=self.args.num_workers, drop_last=True
+                valid_data, batch_size=self.args.batch_size, shuffle=False, num_workers=self.args.num_workers, drop_last=True,
+                collate_fn=meteo_collate_fn
             )
             self.test_loader = torch.utils.data.DataLoader(
-                test_data, batch_size=3 , shuffle=False, num_workers=self.args.num_workers
+                test_data, batch_size=self.args.batch_size , shuffle=False, num_workers=self.args.num_workers, collate_fn=meteo_collate_fn
             )
         else:
             self.train_loader = train_data.get_torch_dataloader(num_workers=self.args.num_workers)
