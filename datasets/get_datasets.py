@@ -136,20 +136,7 @@ def get_dataset(data_name, img_size, seq_len, **kwargs):
     dataset_name = data_name.lower()
     train = val = test = None
 
-    if dataset_name == 'cikm':
-        from .dataset_cikm import CIKM, gray2color, PIXEL_SCALE, THRESHOLDS
-        
-        train = CIKM(DATAPATH[data_name], 'train', img_size)
-        val = CIKM(DATAPATH[data_name], 'valid', img_size)
-        test = CIKM(DATAPATH[data_name], 'test', img_size)
-        
-    elif data_name == 'shanghai':
-        from .dataset_shanghai import Shanghai, gray2color, THRESHOLDS, PIXEL_SCALE
-        train = Shanghai(DATAPATH[data_name], type='train', img_size=img_size)
-        val = Shanghai(DATAPATH[data_name], type='val', img_size=img_size)
-        test = Shanghai(DATAPATH[data_name], type='test', img_size=img_size)
-    
-    elif data_name == 'meteo':
+    if data_name == 'meteo':
         from .dataset_meteonet import Meteo, gray2color, THRESHOLDS, PIXEL_SCALE
         train = Meteo(DATAPATH[data_name], type='train', img_size=img_size)
         val = Meteo(DATAPATH[data_name], type='val', img_size=img_size)
