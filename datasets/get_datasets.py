@@ -128,7 +128,7 @@ def vis_res(input_seq, pred_seq, gt_seq, save_path, data_type='vil',
 DATAPATH = {
     'cikm' : 'data/CIKM2017/CIKM2017.h5',
     'shanghai' : 'data/shanghai/shanghai.h5',
-    'meteo' : 'data/MeteoNet/MeteoNet.h5',
+    'meteo' : '../DiffCastB/data/meteo/MeteoNet.h5',
     'sevir' : '../DiffCastB/data/sevir/',
 }
 

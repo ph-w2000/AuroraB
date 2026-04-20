@@ -39,7 +39,7 @@ def create_parser():
     parser.add_argument("--exp_dir",        type=str,   default='basic_exps',   help="experiment directory")
 
     # --------------- Dataset ---------------
-    parser.add_argument("--dataset",        type=str,   default='sevir',        help="dataset name")
+    parser.add_argument("--dataset",        type=str,   default='meteo',        help="dataset name")
     parser.add_argument("--img_size",       type=int,   default=128,            help="image size")
     parser.add_argument("--img_channel",    type=int,   default=1,              help="channel of image")
     parser.add_argument("--seq_len",        type=int,   default=22,             help="sequence length sampled from dataset")
@@ -62,7 +62,7 @@ def create_parser():
     parser.add_argument("--stride",         type=int,   default=13,               help="stride")
     parser.add_argument("--batch_size",     type=int,   default=8,              help="batch size")
 
-    parser.add_argument("--epochs",         type=int,   default=40,               help="number of epochs")
+    parser.add_argument("--epochs",         type=int,   default=20,               help="number of epochs")
     parser.add_argument("--training_steps", type=int,   default=200000,          help="number of training steps")
     parser.add_argument("--early_stop",     type=int,   default=10,              help="early stopping steps")
     parser.add_argument("--ckpt_milestone", type=str,   default=None,            help="resumed checkpoint milestone")
@@ -473,7 +473,7 @@ class Runner(object):
             metadata=Metadata(
                 lat=None,
                 lon=None,
-                time=tuple((t+pd.Timedelta(minutes=5 * 0)).to_pydatetime() for t in input_metadata['time_utc']),
+                time=tuple((t+pd.Timedelta(minutes=5 * 0)) for t in input_metadata['time_utc']),
                 atmos_levels=(50,),
             ),
         )
@@ -482,7 +482,7 @@ class Runner(object):
         for i in range(self.args.frames_out):
             aurora_batch.surf_vars={"vil": model_input}
             aurora_batch.metadata.rollout_step = i
-            aurora_batch.metadata.time = tuple((t+pd.Timedelta(minutes=5 * i)).to_pydatetime() for t in input_metadata['time_utc'])
+            aurora_batch.metadata.time = tuple((t+pd.Timedelta(minutes=5 * i)) for t in input_metadata['time_utc'])
             aurora_batch.memory_snapshot = local_memory
 
             prediction, new_memory = self.model(aurora_batch.to(self.device))
@@ -529,7 +529,7 @@ class Runner(object):
                 metadata=Metadata(
                     lat=None,
                     lon=None,
-                    time=tuple((t+pd.Timedelta(minutes=5 * 0)).to_pydatetime() for t in input_metadata['time_utc']),
+                    time=tuple((t+pd.Timedelta(minutes=5 * 0)) for t in input_metadata['time_utc']),
                     atmos_levels=(50,),
                 ),
             )
@@ -538,7 +538,7 @@ class Runner(object):
             for i in range(self.args.frames_out):
                 aurora_batch.surf_vars={"vil": model_input}
                 aurora_batch.metadata.rollout_step = i
-                aurora_batch.metadata.time = tuple((t+pd.Timedelta(minutes=5 * i)).to_pydatetime() for t in input_metadata['time_utc'])
+                aurora_batch.metadata.time = tuple((t+pd.Timedelta(minutes=5 * i)) for t in input_metadata['time_utc'])
                 aurora_batch.memory_snapshot = local_memory
 
                 prediction, new_memory = self.model(aurora_batch.to(self.device))
@@ -584,7 +584,7 @@ class Runner(object):
             # evaluate result and save
             eval.evaluate(radar_ori, radar_recon)
 
-            if cnt >=0:
+            if cnt <=5:
                 if self.is_main:
                     for i in range(radar_ori.shape[0]):
                         iou = round(mean_iou_over_thresholds(radar_ori[i], radar_recon[i], self.thresholds),4)

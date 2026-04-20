@@ -312,8 +312,8 @@ class Perceiver3DEncoder(nn.Module):
         self.surf_norm = nn.LayerNorm(embed_dim)
 
         # Position, scale, and time embeddings
-        self.pos_embed = nn.Linear(embed_dim, embed_dim)
-        self.scale_embed = nn.Linear(embed_dim, embed_dim)
+        # self.pos_embed = nn.Linear(embed_dim, embed_dim)
+        # self.scale_embed = nn.Linear(embed_dim, embed_dim)
         self.lead_time_embed = nn.Linear(embed_dim, embed_dim)
         self.absolute_time_embed = nn.Linear(embed_dim, embed_dim)
         self.atmos_levels_embed = nn.Linear(embed_dim, embed_dim)
