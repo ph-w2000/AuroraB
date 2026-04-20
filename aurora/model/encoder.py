@@ -466,6 +466,11 @@ class Perceiver3DEncoder(nn.Module):
         #                 dim=2,
         #             )
 
+        lat, lon = batch.metadata.lat, batch.metadata.lon
+        check_lat_lon_dtype(lat, lon)
+        lat, lon = lat.to(dtype=torch.float32), lon.to(dtype=torch.float32)
+        assert lat.shape[-1] == H and lon.shape[-1] == W
+
         # Patch embed the surface level.
         x_surf = rearrange(x_surf, "b t v h w -> b v t h w")
         x_surf = self.surf_token_embeds(x_surf, surf_vars)  # (B, L, D)
@@ -473,17 +478,17 @@ class Perceiver3DEncoder(nn.Module):
 
         # In the original implementation, both `z` and `static_z` point towards the same index,
         # meaning that they select the same slice. Simulate this bug.
-        # if self.simulate_indexing_bug and "z" in atmos_vars:
-        #     i_z = atmos_vars.index("z")
-        #     i_static_z = atmos_vars.index("static_z")
-        #     x_atmos = torch.cat(
-        #         (
-        #             x_atmos[:, :, :i_static_z],
-        #             x_atmos[:, :, i_z : i_z + 1],
-        #             x_atmos[:, :, i_static_z + 1 :],
-        #         ),
-        #         dim=2,
-        #     )
+        if self.simulate_indexing_bug and "z" in atmos_vars:
+            i_z = atmos_vars.index("z")
+            i_static_z = atmos_vars.index("static_z")
+            x_atmos = torch.cat(
+                (
+                    x_atmos[:, :, :i_static_z],
+                    x_atmos[:, :, i_z : i_z + 1],
+                    x_atmos[:, :, i_static_z + 1 :],
+                ),
+                dim=2,
+            )
 
         # Patch embed the atmospheric levels.
         # if not self.level_condition:
@@ -516,28 +521,23 @@ class Perceiver3DEncoder(nn.Module):
         x = x_surf.unsqueeze(1)
 
         # Add position and scale embeddings to the 3D tensor.
-        lat, lon = batch.metadata.lat, batch.metadata.lon
-        if lat is not None and lon is not None:
-            check_lat_lon_dtype(lat, lon)
-            lat, lon = lat.to(dtype=torch.float32), lon.to(dtype=torch.float32)
-            assert lat.shape[-1] == H and lon.shape[-1] == W
-            pos_encode_list, scale_encode_list = [], []
-            for la, lo in zip(lat, lon):
-                pos_encode, scale_encode = pos_scale_enc(
-                    self.embed_dim,
-                    la,
-                    lo,
-                    self.patch_size,
-                    pos_expansion=pos_expansion,
-                    scale_expansion=scale_expansion,
-                )
-                pos_encode_list.append(pos_encode)
-                scale_encode_list.append(scale_encode)
-            pos_encode = torch.stack(pos_encode_list, dim=0).unsqueeze(1)  # (B, 1, L, D)
-            scale_encode = torch.stack(scale_encode_list, dim=0).unsqueeze(1)  # (B, 1, L, D)
-            pos_encode = self.pos_embed(pos_encode.to(dtype=dtype))
-            scale_encode = self.scale_embed(scale_encode.to(dtype=dtype))
-            x = x + pos_encode + scale_encode
+        pos_encode_list, scale_encode_list = [], []
+        for la, lo in zip(lat, lon):
+            pos_encode, scale_encode = pos_scale_enc(
+                self.embed_dim,
+                la,
+                lo,
+                self.patch_size,
+                pos_expansion=pos_expansion,
+                scale_expansion=scale_expansion,
+            )
+            pos_encode_list.append(pos_encode)
+            scale_encode_list.append(scale_encode)
+        pos_encode = torch.stack(pos_encode_list, dim=0).unsqueeze(1)  # (B, 1, L, D)
+        scale_encode = torch.stack(scale_encode_list, dim=0).unsqueeze(1)  # (B, 1, L, D)
+        pos_encode = self.pos_embed(pos_encode.to(dtype=dtype))
+        scale_encode = self.scale_embed(scale_encode.to(dtype=dtype))
+        x = x + pos_encode + scale_encode
 
         # Flatten the tokens.
         x = x.reshape(B, -1, self.embed_dim)  # (B, C + 1, L, D) to (B, L', D)

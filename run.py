@@ -465,14 +465,38 @@ class Runner(object):
         predictions = []
         model_input = frames_in
 
+        lat_grid = torch.stack(
+            [
+                torch.linspace(
+                    input_metadata['urcrnrlat'][i],
+                    input_metadata['llcrnrlat'][i],
+                    self.args.img_size
+                )
+                for i in range(len(input_metadata['urcrnrlat']))
+            ],
+            dim=0
+        )
+
+        lon_grid = torch.stack(
+            [
+                torch.linspace(
+                    input_metadata['llcrnrlon'][i]%360,
+                    input_metadata['urcrnrlon'][i]%360,
+                    self.args.img_size + 1
+                )[:-1]
+                for i in range(len(input_metadata['llcrnrlon']))
+            ],
+            dim=0
+        )
+
         aurora_batch = Batch(
             surf_vars={"vil": model_input},
             static_vars={},
             atmos_vars={},
             memory_snapshot=None,
             metadata=Metadata(
-                lat=None,
-                lon=None,
+                lat=lat_grid,
+                lon=lon_grid,
                 time=tuple((t+pd.Timedelta(minutes=5 * 0)).to_pydatetime() for t in input_metadata['time_utc']),
                 atmos_levels=(50,),
             ),
@@ -521,14 +545,38 @@ class Runner(object):
             predictions = []
             model_input = frames_in
 
+            lat_grid = torch.stack(
+                [
+                    torch.linspace(
+                        input_metadata['urcrnrlat'][i],
+                        input_metadata['llcrnrlat'][i],
+                        self.args.img_size
+                    )
+                    for i in range(len(input_metadata['urcrnrlat']))
+                ],
+                dim=0
+            )
+
+            lon_grid = torch.stack(
+                [
+                    torch.linspace(
+                        input_metadata['llcrnrlon'][i]%360,
+                        input_metadata['urcrnrlon'][i]%360,
+                        self.args.img_size + 1
+                    )[:-1]
+                    for i in range(len(input_metadata['llcrnrlon']))
+                ],
+                dim=0
+            )
+
             aurora_batch = Batch(
                 surf_vars={"vil": model_input},
                 static_vars={},
                 atmos_vars={},
                 memory_snapshot=None,
                 metadata=Metadata(
-                    lat=None,
-                    lon=None,
+                    lat=lat_grid,
+                    lon=lon_grid,
                     time=tuple((t+pd.Timedelta(minutes=5 * 0)).to_pydatetime() for t in input_metadata['time_utc']),
                     atmos_levels=(50,),
                 ),
@@ -584,7 +632,7 @@ class Runner(object):
             # evaluate result and save
             eval.evaluate(radar_ori, radar_recon)
 
-            if cnt >=0:
+            if cnt <=5:
                 if self.is_main:
                     for i in range(radar_ori.shape[0]):
                         iou = round(mean_iou_over_thresholds(radar_ori[i], radar_recon[i], self.thresholds),4)

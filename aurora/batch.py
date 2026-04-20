@@ -43,18 +43,17 @@ class Metadata:
     rollout_step: int = 0
 
     def __post_init__(self):
-        if self.lat is not None and self.lon is not None:
-            if not (torch.all(self.lat <= 90) and torch.all(self.lat >= -90)):
-                raise ValueError("Latitudes must be in the range [-90, 90].")
-            if not (torch.all(self.lon >= 0) and torch.all(self.lon < 360)):
-                raise ValueError("Longitudes must be in the range [0, 360).")
+        if not (torch.all(self.lat <= 90) and torch.all(self.lat >= -90)):
+            raise ValueError("Latitudes must be in the range [-90, 90].")
+        if not (torch.all(self.lon >= 0) and torch.all(self.lon < 360)):
+            raise ValueError("Longitudes must be in the range [0, 360).")
 
-            # Validate vector-valued latitudes and longitudes:
-            if self.lat.dim() == self.lon.dim() == 1:
-                if not torch.all(self.lat[1:] - self.lat[:-1] < 0):
-                    raise ValueError("Latitudes must be strictly decreasing.")
-                if not torch.all(self.lon[1:] - self.lon[:-1] > 0):
-                    raise ValueError("Longitudes must be strictly increasing.")
+        # Validate vector-valued latitudes and longitudes:
+        if self.lat.dim() == self.lon.dim() == 1:
+            if not torch.all(self.lat[1:] - self.lat[:-1] < 0):
+                raise ValueError("Latitudes must be strictly decreasing.")
+            if not torch.all(self.lon[1:] - self.lon[:-1] > 0):
+                raise ValueError("Longitudes must be strictly increasing.")
 
         # Validate matrix-valued latitudes and longitudes:
         # elif self.lat.dim() == self.lon.dim() == 2:
@@ -189,11 +188,11 @@ class Batch:
 
     def to(self, device: str | torch.device) -> "Batch":
         """Move the batch to another device."""
-        return self._fmap(lambda x: x.to(device) if x is not None else None)
+        return self._fmap(lambda x: x.to(device))
 
     def type(self, t: type) -> "Batch":
         """Convert everything to type `t`."""
-        return self._fmap(lambda x: x.type(t) if x is not None else None)
+        return self._fmap(lambda x: x.type(t))
 
     def regrid(self, res: float) -> "Batch":
         """Regrid the batch to a `res` degrees resolution.
