@@ -74,7 +74,7 @@ def vis_res(input_seq, pred_seq, gt_seq, save_path, data_type='vil',
             for idx, i in enumerate(colored_input)
         ], axis=-2)
     ], axis=-3)
-    grid_input = np.pad(grid_input, ((0, 0), (0, 2394), (0, 0)), mode='constant', constant_values=0)
+    grid_input = np.pad(grid_input, ((0, 0), (0, 1995), (0, 0)), mode='constant', constant_values=0)
     # grid_input = np.pad(grid_input, ((0, 0), (0, 1069), (0, 0)), mode='constant', constant_values=0)
 
 

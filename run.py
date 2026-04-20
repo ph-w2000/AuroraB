@@ -42,8 +42,8 @@ def create_parser():
     parser.add_argument("--dataset",        type=str,   default='sevir',        help="dataset name")
     parser.add_argument("--img_size",       type=int,   default=128,            help="image size")
     parser.add_argument("--img_channel",    type=int,   default=1,              help="channel of image")
-    parser.add_argument("--seq_len",        type=int,   default=22,             help="sequence length sampled from dataset")
-    parser.add_argument("--frames_in",      type=int,   default=2,              help="number of frames to input")
+    parser.add_argument("--seq_len",        type=int,   default=25,             help="sequence length sampled from dataset")
+    parser.add_argument("--frames_in",      type=int,   default=5,              help="number of frames to input")
     parser.add_argument("--frames_out",     type=int,   default=20,             help="number of frames to output")    
     parser.add_argument("--num_workers",    type=int,   default=8,              help="number of workers for data loader")
     
@@ -60,7 +60,7 @@ def create_parser():
     
     # --------------- Training ---------------
     parser.add_argument("--stride",         type=int,   default=13,               help="stride")
-    parser.add_argument("--batch_size",     type=int,   default=8,              help="batch size")
+    parser.add_argument("--batch_size",     type=int,   default=16,              help="batch size")
 
     parser.add_argument("--epochs",         type=int,   default=40,               help="number of epochs")
     parser.add_argument("--training_steps", type=int,   default=200000,          help="number of training steps")
@@ -503,22 +503,22 @@ class Runner(object):
         )
 
         local_memory = None
-        for i in range(self.args.frames_out):
+        for i in range(int(self.args.frames_out//self.args.frames_in)):
             aurora_batch.surf_vars={"vil": model_input}
             aurora_batch.metadata.rollout_step = i
             aurora_batch.metadata.time = tuple((t+pd.Timedelta(minutes=5 * i)).to_pydatetime() for t in input_metadata['time_utc'])
             aurora_batch.memory_snapshot = local_memory
 
             prediction, new_memory = self.model(aurora_batch.to(self.device))
-            prediction = prediction.surf_vars['vil']
-            predictions.append(prediction.clamp(0,1))
+            prediction = prediction.surf_vars['vil'].clamp(0,1)
+            predictions.append(prediction)
             
             if local_memory is None:
                 local_memory = new_memory.unsqueeze(1).detach()          # [B,1,L,D]
             else:
                 local_memory = torch.cat([local_memory, new_memory.unsqueeze(1)], dim=1).detach()  # [B,T,L,D]
 
-            model_input = torch.cat([model_input[:,-1:,], frames_out[:,i:i+1]], dim=1)
+            model_input = prediction
         
         predictions = torch.cat(predictions, dim=1)
         loss = F.l1_loss(predictions, frames_out, reduction = 'mean')
@@ -583,7 +583,7 @@ class Runner(object):
             )
 
             local_memory = None
-            for i in range(self.args.frames_out):
+            for i in range(int(self.args.frames_out//self.args.frames_in)):
                 aurora_batch.surf_vars={"vil": model_input}
                 aurora_batch.metadata.rollout_step = i
                 aurora_batch.metadata.time = tuple((t+pd.Timedelta(minutes=5 * i)).to_pydatetime() for t in input_metadata['time_utc'])
@@ -593,7 +593,7 @@ class Runner(object):
                 prediction = prediction.surf_vars['vil'].clamp(0,1)
                 predictions.append(prediction.to("cpu"))
 
-                model_input = torch.cat([model_input[:,-1:,], prediction], dim=1)
+                model_input = prediction
                 if local_memory is None:
                     local_memory = new_memory.unsqueeze(1)         # [B,1,L,D]
                 else:

@@ -74,7 +74,7 @@ class Aurora(torch.nn.Module):
         dec_depth: int = 1,
         dec_mlp_ratio: float = 2.0,
         perceiver_ln_eps: float = 1e-5,
-        max_history_size: int = 2,
+        max_history_size: int = 5,
         timestep: timedelta = timedelta(hours=6),
         stabilise_level_agg: bool = False,
         use_lora: bool = True,
@@ -359,7 +359,7 @@ class Aurora(torch.nn.Module):
         # Insert history dimension in prediction. The time should already be right.
         pred = dataclasses.replace(
             pred,
-            surf_vars={k: v[:, None] for k, v in pred.surf_vars.items()},
+            surf_vars={k: v for k, v in pred.surf_vars.items()},
             atmos_vars={k: v[:, None] for k, v in pred.atmos_vars.items()},
         )
 
