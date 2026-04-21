@@ -115,7 +115,7 @@ class Perceiver3DDecoder(nn.Module):
             )
 
         self.surf_heads = nn.ParameterDict(
-            {name: LinearPatchReconstruction(embed_dim, 5*patch_size**2) for name in surf_vars}
+            {name: LinearPatchReconstruction(embed_dim, patch_size**2) for name in surf_vars}
         )
         # if not self.level_condition:
         #     self.atmos_heads = nn.ParameterDict(
@@ -213,7 +213,7 @@ class Perceiver3DDecoder(nn.Module):
         # Decode surface vars. Run the head for every surface-level variable.
         x_surf = torch.stack([self.surf_heads[name](x[..., :1, :]) for name in surf_vars], dim=-1)
         x_surf = x_surf.reshape(*x_surf.shape[:3], -1)  # (B, L, 1, V_S*p*p)
-        surf_preds = unpatchify(x_surf, len(surf_vars)*5, H, W, self.patch_size)
+        surf_preds = unpatchify(x_surf, len(surf_vars), H, W, self.patch_size)
         surf_preds = surf_preds.squeeze(2)  # (B, V_S, H, W)
 
         # Embed the atmospheric levels.
@@ -263,7 +263,7 @@ class Perceiver3DDecoder(nn.Module):
         # atmos_preds = unpatchify(x_atmos, len(atmos_vars), H, W, self.patch_size)
 
         return Batch(
-            {v: surf_preds for i, v in enumerate(surf_vars)},
+            {v: surf_preds[:, i] for i, v in enumerate(surf_vars)},
             batch.static_vars,
             {},
             batch.memory_snapshot,

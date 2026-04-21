@@ -359,7 +359,7 @@ class Aurora(torch.nn.Module):
         # Insert history dimension in prediction. The time should already be right.
         pred = dataclasses.replace(
             pred,
-            surf_vars={k: v for k, v in pred.surf_vars.items()},
+            surf_vars={k: v[:, None] for k, v in pred.surf_vars.items()},
             atmos_vars={k: v[:, None] for k, v in pred.atmos_vars.items()},
         )
 

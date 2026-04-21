@@ -48,7 +48,7 @@ def create_parser():
     parser.add_argument("--num_workers",    type=int,   default=8,              help="number of workers for data loader")
     
     # --------------- Optimizer ---------------
-    parser.add_argument("--lr",             type=float, default=1e-4,            help="learning rate")
+    parser.add_argument("--lr",             type=float, default=5e-4,            help="learning rate")
     parser.add_argument("--lr-beta1",       type=float, default=0.90,            help="learning rate beta 1")
     parser.add_argument("--lr-beta2",       type=float, default=0.95,            help="learning rate beta 2")
     parser.add_argument("--l2-norm",        type=float, default=3e-5,            help="l2 norm weight decay")
@@ -503,7 +503,7 @@ class Runner(object):
         )
 
         local_memory = None
-        for i in range(int(self.args.frames_out//self.args.frames_in)):
+        for i in range(self.args.frames_out):
             aurora_batch.surf_vars={"vil": model_input}
             aurora_batch.metadata.rollout_step = i
             aurora_batch.metadata.time = tuple((t+pd.Timedelta(minutes=5 * i)).to_pydatetime() for t in input_metadata['time_utc'])
@@ -518,7 +518,7 @@ class Runner(object):
             else:
                 local_memory = torch.cat([local_memory, new_memory.unsqueeze(1)], dim=1).detach()  # [B,T,L,D]
 
-            model_input = prediction
+            model_input = torch.cat([model_input[:,-4:,], frames_out[:,i:i+1]], dim=1)
         
         predictions = torch.cat(predictions, dim=1)
         loss = F.l1_loss(predictions, frames_out, reduction = 'mean')
@@ -583,7 +583,7 @@ class Runner(object):
             )
 
             local_memory = None
-            for i in range(int(self.args.frames_out//self.args.frames_in)):
+            for i in range(self.args.frames_out):
                 aurora_batch.surf_vars={"vil": model_input}
                 aurora_batch.metadata.rollout_step = i
                 aurora_batch.metadata.time = tuple((t+pd.Timedelta(minutes=5 * i)).to_pydatetime() for t in input_metadata['time_utc'])
@@ -599,7 +599,7 @@ class Runner(object):
                 else:
                     local_memory = torch.cat([local_memory, new_memory.unsqueeze(1)], dim=1)  # [B,T,L,D]
 
-            predictions = torch.cat(predictions, dim=1)
+            predictions = torch.cat([model_input[:,-1:,], prediction], dim=1)
         
             radar_gt = self.accelerator.gather(frames_out).detach().cpu().numpy()
             radar_pred = self.accelerator.gather(predictions).numpy()
