@@ -48,7 +48,7 @@ def create_parser():
     parser.add_argument("--num_workers",    type=int,   default=8,              help="number of workers for data loader")
     
     # --------------- Optimizer ---------------
-    parser.add_argument("--lr",             type=float, default=5e-4,            help="learning rate")
+    parser.add_argument("--lr",             type=float, default=1e-4,            help="learning rate")
     parser.add_argument("--lr-beta1",       type=float, default=0.90,            help="learning rate beta 1")
     parser.add_argument("--lr-beta2",       type=float, default=0.95,            help="learning rate beta 2")
     parser.add_argument("--l2-norm",        type=float, default=3e-5,            help="l2 norm weight decay")
