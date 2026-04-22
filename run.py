@@ -593,13 +593,14 @@ class Runner(object):
                 prediction = prediction.surf_vars['vil'].clamp(0,1)
                 predictions.append(prediction.to("cpu"))
 
-                model_input = prediction
                 if local_memory is None:
                     local_memory = new_memory.unsqueeze(1)         # [B,1,L,D]
                 else:
                     local_memory = torch.cat([local_memory, new_memory.unsqueeze(1)], dim=1)  # [B,T,L,D]
 
-            predictions = torch.cat([model_input[:,-1:,], prediction], dim=1)
+                model_input = torch.cat([model_input[:,-4:,], prediction], dim=1)
+
+            predictions = torch.cat(predictions, dim=1)
         
             radar_gt = self.accelerator.gather(frames_out).detach().cpu().numpy()
             radar_pred = self.accelerator.gather(predictions).numpy()
