@@ -11,6 +11,8 @@ from datetime import timedelta
 import wandb
 import pandas as pd
 import torch.nn.functional as F
+import matplotlib.pyplot as plt
+import numpy as np
 
 import torch
 from accelerate import Accelerator
@@ -636,6 +638,7 @@ class Runner(object):
                 if self.is_main:
                     for i in range(radar_ori.shape[0]):
                         iou = round(mean_iou_over_thresholds(radar_ori[i], radar_recon[i], self.thresholds),4)
+                        self.visualize_drift( radar_recon[i], radar_ori[i], step=16, save_path=osp.join(save_dir, f"{cnt}-{i}"))
                         self.visiual_save_fn(radar_input[i], radar_recon[i], radar_ori[i], osp.join(save_dir, f"{cnt}-{i}-{iou}"),data_type='vil')
 
             self.accelerator.wait_for_everyone()
@@ -647,6 +650,160 @@ class Runner(object):
             res = eval.done()
             print_log(f"Test Results: {res}")
             print_log("="*30)
+
+
+    def compute_motion(self, x):
+        """
+        x: [T, H, W]
+        return: motion field [T-1, 2, H, W]  (dx, dy)
+        """
+        # spatial gradients
+        dx = x[..., :, 1:] - x[..., :, :-1]
+        dy = x[..., 1:, :] - x[..., :-1, :]
+
+        # pad to match size
+        dx = np.pad(dx, ((0,0),(0,0),(0,1)), mode='edge')
+        dy = np.pad(dy, ((0,0),(0,1),(0,0)), mode='edge')
+
+        # temporal difference (motion proxy)
+        dt = x[1:] - x[:-1]  # [T-1, H, W]
+
+        # combine spatial + temporal
+        vx = dt * dx[:-1]
+        vy = dt * dy[:-1]
+        flow = np.stack([vx, vy], axis=1) #[T-1, 2, H, W]
+
+        return flow
+    
+    def intensity_error(self, pred, gt):
+        return np.abs(pred - gt)   # [T, H, W]
+    
+    def direction_mismatch(self, flow_pred, flow_gt, eps=1e-6):
+        """
+        flow_pred, flow_gt: [T-1, 2, H, W]
+        return: [T-1, H, W]
+        """
+
+        dot = np.sum(flow_pred * flow_gt, axis=1)
+
+        norm_pred = np.linalg.norm(flow_pred, axis=1)
+        norm_gt   = np.linalg.norm(flow_gt, axis=1)
+
+        cos_sim = dot / (norm_pred * norm_gt + eps)
+
+        # numerical stability
+        cos_sim = np.clip(cos_sim, -1.0, 1.0)
+
+        dir_error = 1 - cos_sim
+
+        return dir_error
+    
+
+    def visualize_drift(self, pred, gt, step=8, save_path=""):
+        """
+        pred, gt: [T, 1, H, W]
+        step: arrow sparsity
+        """
+        flow_pred = self.compute_motion(pred)  # [T, 2, H, W]
+        flow_gt   = self.compute_motion(gt)
+
+        # intensity error
+        int_err = self.intensity_error(pred[1:], pred[:-1]) # [T, H, W]
+
+        # # directional error
+        # dir_error = self.direction_mismatch(flow_pred, flow_gt) # [T-1, H, W]
+
+        T, H, W = pred.shape
+        Y, X = np.mgrid[0:H, 0:W]
+
+        # subsample arrows
+        Xs = X[::step, ::step]
+        Ys = Y[::step, ::step]
+
+        gap_px=5
+        dpi = 200
+        fig_w_in = 3*T
+        fig_w_px = fig_w_in * dpi
+        ax_w_px = fig_w_px / T    # approximate width of each subplot
+        wspace = gap_px / ax_w_px
+
+        fig, axes = plt.subplots(1, T, figsize=(3 * T, 3), dpi=200)
+        fig.subplots_adjust(wspace=wspace)
+        
+        # consistent color scale across all timesteps
+        vmax = np.max(int_err) + 1e-8
+        for t in range(T):
+            ax = axes[t]
+            # background heatmap
+            if t<19:
+                im = ax.imshow(int_err[t], cmap="jet", vmin=0, vmax=vmax, alpha=0.7)
+            else:
+                im = ax.imshow(int_err[-1], cmap="jet", vmin=0, vmax=vmax, alpha=0.7)
+
+            # arrows only for t >= 1
+            if t >= 1:
+                # flow_diff = flow_pred[t - 1] - flow_gt[t - 1] # [2, H, W]
+                flow_diff = flow_pred[t - 1]
+                U = flow_diff[0][::step, ::step]
+                V = flow_diff[1][::step, ::step]
+
+                # optional: normalize arrows so direction is visible
+                mag = np.sqrt(U**2 + V**2)
+
+                # ROI in original image coordinates
+                row_start, row_end = 40, 128
+                col_start, col_end = 70, 128
+
+                # convert ROI to subsampled-grid coordinates
+                r0 = row_start // step
+                r1 = row_end // step
+                c0 = col_start // step
+                c1 = col_end // step
+
+                # crop ROI
+                mag_roi = mag[r0:r1, c0:c1]
+
+                # keep top-k only inside ROI
+                k = min(5, mag_roi.size)
+                flat_idx = np.argsort(mag_roi.ravel())[-k:]   # top-k in flattened ROI
+                roi_keep_mask = np.zeros(mag_roi.shape, dtype=bool)
+                roi_keep_mask[np.unravel_index(flat_idx, mag_roi.shape)] = True
+
+                # build full mask (False everywhere except selected ROI positions)
+                keep_mask = np.zeros(mag.shape, dtype=bool)
+                keep_mask[r0:r1, c0:c1] = roi_keep_mask
+
+                # normalize arrows for display
+                U_plot = U / (mag + 1e-6)
+                V_plot = V / (mag + 1e-6)
+
+                # hide everything except selected ROI arrows
+                U_plot = np.ma.masked_where(~keep_mask, U_plot)
+                V_plot = np.ma.masked_where(~keep_mask, V_plot)
+
+                ax.quiver(
+                    Xs, Ys, U_plot, V_plot,
+                    color="red",
+                    scale_units="xy",
+                    # scale=0.06,   # smaller -> bigger arrows
+                    # width=0.015
+                    scale=0.1,  
+                    width=0.007
+                )
+            ax.axis("off")
+
+        # one shared colorbar
+        # cbar = fig.colorbar(
+        #     im,
+        #     ax=axes,
+        #     location="bottom",
+        #     fraction=0.04,
+        #     pad=0.08
+        # )
+        # cbar.set_label("Intensity Error", fontsize=10)
+        # plt.tight_layout()
+        plt.savefig(save_path+"_drift.png", bbox_inches="tight")
+        plt.close()
 
         
     def check_milestones(self, target_ckpt=None):
